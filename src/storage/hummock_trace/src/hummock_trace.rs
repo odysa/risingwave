@@ -268,24 +268,23 @@ mod tests {
         let tracer = Arc::new(tracer);
 
         let mut handles = Vec::new();
+        let epoch1 = 1;
         for i in 0..count {
             let t = tracer.clone();
             #[cfg(not(madsim))]
             let f = task_local_scope(i as u64, async move {
-                t.new_trace_span(Operation::Get(vec![i], true, 0, 0, None));
-                t.new_trace_span(Operation::Sync(i as u64));
                 let k = format!("key{}", i).as_bytes().to_vec();
                 let v = format!("value{}", i).as_bytes().to_vec();
-                t.new_trace_span(Operation::Ingest(vec![(k, Some(v))], 0, 0));
+                t.new_trace_span(Operation::Ingest(vec![(k.clone(), Some(v))], epoch1, 0));
+                t.new_trace_span(Operation::Get(k, true, epoch1, 0, None));
             });
 
             #[cfg(madsim)]
             let f = async move {
-                t.new_trace_span(Operation::Get(vec![i], true));
-                t.new_trace_span(Operation::Sync(i as u64));
                 let k = format!("key{}", i).as_bytes().to_vec();
                 let v = format!("value{}", i).as_bytes().to_vec();
-                t.new_trace_span(Operation::Ingest(vec![(k, v)]));
+                t.new_trace_span(Operation::Ingest(vec![(k.clone(), Some(v))], epoch1, 0));
+                t.new_trace_span(Operation::Get(k, true, epoch1, 0, None));
             };
 
             handles.push(tokio::spawn(f));

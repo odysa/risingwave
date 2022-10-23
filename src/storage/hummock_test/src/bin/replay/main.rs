@@ -21,12 +21,13 @@ use std::sync::Arc;
 use clap::Parser;
 use hummock_replay::{get_test_notification_client, HummockInterface};
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_trace::{HummockReplay, Result, TraceReaderImpl};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_storage::hummock::compaction_group_client::{
-    CompactionGroupClientImpl, MetaCompactionGroupClient,
+    CompactionGroupClientImpl, DummyCompactionGroupClient,
 };
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
@@ -37,14 +38,17 @@ struct Args {
     path: String,
 }
 
-fn main() {}
+#[tokio::main]
+async fn main() {
+    let opts = Args::parse();
+    let path = Path::new(&opts.path);
+    run_replay(path).await.unwrap();
+}
 
 async fn run_replay(path: &Path) -> Result<()> {
     let f = File::open(path)?;
     let reader = TraceReaderImpl::new(f)?;
-    let hummock = create_hummock("".to_string())
-        .await
-        .expect("fail to create hummock");
+    let hummock = create_hummock().await.expect("fail to create hummock");
     let replay_interface = Box::new(HummockInterface::new(hummock));
     let (mut replayer, handle) = HummockReplay::new(reader, replay_interface);
 
@@ -55,12 +59,33 @@ async fn run_replay(path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn create_hummock(object_store: String) -> Result<HummockStorage> {
-    let config = Arc::new(StorageConfig::default());
+async fn create_hummock() -> Result<HummockStorage> {
+    let config = StorageConfig {
+        sstable_size_mb: 4,
+        block_size_kb: 64,
+        bloom_false_positive: 0.1,
+        share_buffers_sync_parallelism: 2,
+        share_buffer_compaction_worker_threads_number: 1,
+        shared_buffer_capacity_mb: 64,
+        data_directory: "hummock_001".to_string(),
+        write_conflict_detection_enabled: true,
+        block_cache_capacity_mb: 64,
+        meta_cache_capacity_mb: 64,
+        disable_remote_compactor: false,
+        enable_local_spill: false,
+        local_object_store: "memory".to_string(),
+        share_buffer_upload_concurrency: 1,
+        compactor_memory_limit_mb: 64,
+        sstable_id_remote_fetch_number: 1,
+        ..Default::default()
+    };
+
+    let config = Arc::new(config);
 
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
     let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
-    let object_store = parse_remote_object_store(&object_store, object_store_stats).await;
+    let object_store =
+        parse_remote_object_store(&config.local_object_store, object_store_stats).await;
 
     let sstable_store = {
         let tiered_cache = TieredCache::none();
@@ -91,9 +116,9 @@ async fn create_hummock(object_store: String) -> Result<HummockStorage> {
         )
     };
 
-    let compaction_group_client = Arc::new(CompactionGroupClientImpl::Meta(Arc::new(
-        MetaCompactionGroupClient::new(hummock_meta_client.clone()),
-    )));
+    let compaction_group_client = Arc::new(CompactionGroupClientImpl::Dummy(
+        DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
+    ));
 
     let storage = HummockStorage::new(
         config,

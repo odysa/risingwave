@@ -105,7 +105,7 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
                                 table_id,
                                 retention_seconds,
                             ) => {
-                                replay
+                                let value = replay
                                     .get(
                                         key,
                                         *check_bloom_filter,
@@ -114,6 +114,9 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
                                         *retention_seconds,
                                     )
                                     .await;
+                                if let Some(value) = value {
+                                    println!("{}", String::from_utf8(value).unwrap());
+                                }
                             }
                             Operation::Ingest(kv_pairs, epoch, table_id) => {
                                 let _ = replay
