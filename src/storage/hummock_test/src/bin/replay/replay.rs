@@ -16,7 +16,7 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_trace::{ReadEpochStatus, ReplayIter, Replayable, Result};
+use risingwave_hummock_trace::{ReadEpochStatus, ReplayIter, Replayable, Result, TraceError};
 use risingwave_meta::manager::NotificationManagerRef;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
@@ -81,6 +81,7 @@ impl Replayable for HummockInterface {
         epoch: u64,
         table_id: u32,
     ) -> Result<usize> {
+        println!("ingest {}", epoch);
         let kv_pairs = kv_pairs
             .drain(..)
             .map(|(key, value)| {
@@ -116,28 +117,30 @@ impl Replayable for HummockInterface {
         epoch: u64,
         table_id: u32,
         retention_seconds: Option<u32>,
-    ) -> Box<dyn ReplayIter> {
-        let iter = self
+    ) -> Result<Box<dyn ReplayIter>> {
+        let result = self
             .0
             .iter(
                 prefix_hint,
-                (left_bound, right_bound),
+                (left_bound.clone(), right_bound.clone()),
                 ReadOptions {
                     epoch,
                     table_id: TableId { table_id },
                     retention_seconds,
                 },
             )
-            .await
-            .unwrap();
-        let iter = HummockReplayIter::new(iter);
+            .await;
 
-        Box::new(iter)
+        if let Ok(iter) = result {
+            let iter = HummockReplayIter::new(iter);
+            Ok(Box::new(iter))
+        }else{
+            Err(TraceError::IterFailed())
+        }
     }
 
     async fn sync(&self, id: u64) {
         let res: SyncResult = self.0.sync(id).await.unwrap();
-        println!("sync epoch {} size: {}", id, res.sync_size);
     }
 
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {

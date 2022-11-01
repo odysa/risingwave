@@ -222,7 +222,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{MockTraceWriter, trace};
+    use crate::{trace, MockTraceWriter};
 
     #[test]
     fn test_global_new_span() {

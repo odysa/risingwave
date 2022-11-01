@@ -266,11 +266,8 @@ where
             #[cfg(hm_trace)]
             {
                 // let span = trace!(ITER, None, key_range, read_options);
-                self.traced_monitored_iter(
-                    self.inner.backward_iter(key_range, read_options),
-                    0
-                )
-                .await
+                self.traced_monitored_iter(self.inner.backward_iter(key_range, read_options), 0)
+                    .await
             }
             #[cfg(not(hm_trace))]
             self.monitored_iter(self.inner.backward_iter(key_range, read_options))

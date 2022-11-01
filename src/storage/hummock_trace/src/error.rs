@@ -35,6 +35,9 @@ pub enum TraceError {
 
     #[error("try to close a non-existing record {0}")]
     FinRecord(RecordId),
+
+    #[error("failed to create a iter")]
+    IterFailed()
 }
 
 impl From<EncodeError> for TraceError {
