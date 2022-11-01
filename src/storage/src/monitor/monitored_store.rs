@@ -19,8 +19,6 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
-#[cfg(hm_trace)]
-use risingwave_hummock_trace::{init_collector, trace, RecordId};
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -41,8 +39,6 @@ pub struct MonitoredStateStore<S> {
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        #[cfg(hm_trace)]
-        init_collector();
         Self { inner, stats }
     }
 }
@@ -51,7 +47,6 @@ impl<S> MonitoredStateStore<S>
 where
     S: StateStore,
 {
-    #[cfg(not(hm_trace))]
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
@@ -83,34 +78,6 @@ where
         Ok(monitored)
     }
 
-    #[cfg(hm_trace)]
-    async fn traced_monitored_iter<'a, I>(
-        &self,
-        iter: I,
-        id: RecordId,
-    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
-    where
-        I: Future<Output = StorageResult<S::Iter>>,
-    {
-        let start_time = minstant::Instant::now();
-        let iter = iter
-            .verbose_stack_trace("store_create_iter")
-            .await
-            .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
-        self.stats.iter_in_process_counts.inc();
-        let monitored = MonitoredStateStoreIter {
-            inner: iter,
-            total_items: 0,
-            total_size: 0,
-            start_time,
-            scan_time: minstant::Instant::now(),
-            stats: self.stats.clone(),
-            id,
-        };
-
-        Ok(monitored)
-    }
-
     pub fn stats(&self) -> Arc<StateStoreMetrics> {
         self.stats.clone()
     }
@@ -135,9 +102,6 @@ where
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            #[cfg(hm_trace)]
-            trace!(GET, key, check_bloom_filter, read_options);
-
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
@@ -215,9 +179,6 @@ where
                 return Ok(0);
             }
 
-            #[cfg(hm_trace)]
-            trace!(INGEST, kv_pairs, write_options);
-
             self.stats
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);
@@ -241,20 +202,7 @@ where
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        async move {
-            #[cfg(hm_trace)]
-            {
-                let span = trace!(ITER, prefix_hint, key_range, read_options);
-                self.traced_monitored_iter(
-                    self.inner.iter(prefix_hint, key_range, read_options),
-                    span.id(),
-                )
-                .await
-            }
-            #[cfg(not(hm_trace))]
-            self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
-                .await
-        }
+        self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
     }
 
     fn backward_iter(
@@ -262,24 +210,11 @@ where
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_> {
-        async move {
-            #[cfg(hm_trace)]
-            {
-                // let span = trace!(ITER, None, key_range, read_options);
-                self.traced_monitored_iter(self.inner.backward_iter(key_range, read_options), 0)
-                    .await
-            }
-            #[cfg(not(hm_trace))]
-            self.monitored_iter(self.inner.backward_iter(key_range, read_options))
-                .await
-        }
+        self.monitored_iter(self.inner.backward_iter(key_range, read_options))
     }
 
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            #[cfg(hm_trace)]
-            trace!(WAITEPOCH, epoch);
-
             self.inner
                 .try_wait_epoch(epoch)
                 .verbose_stack_trace("store_wait_epoch")
@@ -290,8 +225,6 @@ where
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            #[cfg(hm_trace)]
-            trace!(SYNC, epoch);
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
@@ -312,8 +245,6 @@ where
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        #[cfg(hm_trace)]
-        trace!(SEAL, epoch, is_checkpoint);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
@@ -350,8 +281,6 @@ pub struct MonitoredStateStoreIter<I> {
     start_time: minstant::Instant,
     scan_time: minstant::Instant,
     stats: Arc<StateStoreMetrics>,
-    #[cfg(hm_trace)]
-    id: RecordId, // used for tracing
 }
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
@@ -371,14 +300,12 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in next: {:?}", e))?;
 
-            #[cfg(hm_trace)]
-            trace!(ITER_NEXT, self.id, pair);
-
             self.total_items += 1;
             self.total_size += pair
                 .as_ref()
                 .map(|(k, v)| k.len() + v.len())
                 .unwrap_or_default();
+
             Ok(pair)
         }
     }

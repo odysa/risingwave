@@ -18,6 +18,7 @@ use bincode::{BorrowDecode, Decode, Encode};
 use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
+
 pub type RecordId = u64;
 
 pub(crate) struct RecordIdGenerator {
@@ -105,6 +106,19 @@ pub enum Operation {
 
     /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
     MetaMessage(TraceSubResp),
+
+    Result(TraceOpResult),
+}
+
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+pub enum TraceOpResult {
+    Get(Option<Vec<u8>>),
+    Ingest(Option<usize>),
+    Iter(Option<()>),
+    Sync(Option<()>),
+    Seal(Option<()>),
+    WaitEpoch(Option<()>),
+    NotifyHummock(Option<()>),
 }
 
 /// We must derive serialization trait for this

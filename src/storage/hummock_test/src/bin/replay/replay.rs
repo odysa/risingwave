@@ -134,7 +134,7 @@ impl Replayable for HummockInterface {
         if let Ok(iter) = result {
             let iter = HummockReplayIter::new(iter);
             Ok(Box::new(iter))
-        }else{
+        } else {
             Err(TraceError::IterFailed())
         }
     }

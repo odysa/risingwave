@@ -99,25 +99,25 @@ impl<T: TraceReader> HummockReplay<T> {
                 Ok(r) => {
                     println!("read {:?}", r);
                     match r.op() {
-                    Operation::WaitEpoch(_)=>{
-                    }
-                    Operation::Finish => {
-                        let record_id = r.record_id();
-                        if let Some(handle) = handle_map.remove(&record_id) {
-                            // println!("await task {}" , record_id);
-                            handle.await.expect("failed to wait a task");
-                            // println!("await task {} done!" , record_id);
-                        }else{
-                            // println!("record id {} not found", record_id);
+                        Operation::WaitEpoch(_) => {}
+                        Operation::Finish => {
+                            let record_id = r.record_id();
+                            if let Some(handle) = handle_map.remove(&record_id) {
+                                // println!("await task {}" , record_id);
+                                handle.await.expect("failed to wait a task");
+                                // println!("await task {} done!" , record_id);
+                            } else {
+                                // println!("record id {} not found", record_id);
+                            }
+                        }
+                        _ => {
+                            let replay = replay.clone();
+                            let record_id = r.record_id();
+                            let handle = tokio::spawn(handle_record(r, replay));
+                            handle_map.insert(record_id, handle);
                         }
                     }
-                    _ => {
-                        let replay = replay.clone();
-                        let record_id = r.record_id();
-                        let handle = tokio::spawn(handle_record(r, replay));
-                        handle_map.insert(record_id, handle);
-                    }
-                }},
+                }
                 Err(_) => break,
             }
         }
@@ -292,6 +292,7 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
             let f = replay.wait_epoch(epoch);
             f.await.unwrap();
         }
+        _ => {}
     }
 }
 /// worker that actually replays hummock
@@ -377,10 +378,13 @@ async fn handle_replay_records(
                     )
                     .await;
 
-                if let Ok(iter) = iter{
+                if let Ok(iter) = iter {
                     iters.insert(record_id, iter);
-                }else{
-                    println!("iter err {:?} {:?}, epoch {}", left_bound, right_bound, epoch);
+                } else {
+                    println!(
+                        "iter err {:?} {:?}, epoch {}",
+                        left_bound, right_bound, epoch
+                    );
                 }
             }
             Operation::Sync(epoch_id) => {
@@ -429,6 +433,7 @@ async fn handle_replay_records(
                 }
                 f.await.unwrap();
             }
+            _ => {}
         }
     }
 }

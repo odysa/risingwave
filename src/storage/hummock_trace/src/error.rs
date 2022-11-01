@@ -37,7 +37,7 @@ pub enum TraceError {
     FinRecord(RecordId),
 
     #[error("failed to create a iter")]
-    IterFailed()
+    IterFailed(),
 }
 
 impl From<EncodeError> for TraceError {
