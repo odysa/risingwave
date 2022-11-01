@@ -136,7 +136,7 @@ where
     ) -> Self::GetFuture<'_> {
         async move {
             #[cfg(hm_trace)]
-            let _span = trace!(GET, key, check_bloom_filter, read_options);
+            trace!(GET, key, check_bloom_filter, read_options);
 
             let timer = self.stats.get_duration.start_timer();
             let value = self
@@ -216,7 +216,7 @@ where
             }
 
             #[cfg(hm_trace)]
-            let _span = trace!(INGEST, kv_pairs, write_options);
+            trace!(INGEST, kv_pairs, write_options);
 
             self.stats
                 .write_batch_tuple_counts
@@ -265,10 +265,10 @@ where
         async move {
             #[cfg(hm_trace)]
             {
-                let span = trace!(ITER, None, key_range, read_options);
+                // let span = trace!(ITER, None, key_range, read_options);
                 self.traced_monitored_iter(
                     self.inner.backward_iter(key_range, read_options),
-                    span.id(),
+                    0
                 )
                 .await
             }

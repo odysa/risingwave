@@ -151,6 +151,10 @@ impl Drop for GlobalCollector {
     }
 }
 
+/// TraceSpan traces hummock operations. It marks the beginning of an operation and
+/// the end when the span is dropped. So, please make sure the span live long enough.
+/// Underscore binding like `let _ = span` will drop the span immediately.
+#[must_use = "TraceSpan Lifetime is important"]
 #[derive(Clone)]
 pub struct TraceSpan {
     tx: Sender<RecordMsg>,
@@ -218,7 +222,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::MockTraceWriter;
+    use crate::{MockTraceWriter, trace};
 
     #[test]
     fn test_global_new_span() {
