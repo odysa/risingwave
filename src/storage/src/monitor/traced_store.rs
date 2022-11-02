@@ -1,8 +1,7 @@
 use bytes::Bytes;
 use futures::Future;
-use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_hummock_trace::{
-    init_collector, trace, trace_result, Operation, RecordId, TraceOpResult, TraceSpan,
+    init_collector, trace, trace_result, RecordId, TraceOpResult, TraceSpan,
 };
 
 use crate::error::StorageResult;
@@ -162,10 +161,7 @@ impl TracedStateStore<HummockStorage> {
     }
 }
 
-pub struct TracedStateStoreIter<I>
-where
-    I: StateStoreIter<Item = (Bytes, Bytes)>,
-{
+pub struct TracedStateStoreIter<I> {
     inner: I,
     record_id: RecordId,
 }
@@ -180,6 +176,10 @@ where
         impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        async move { self.inner.next().await }
+        async move {
+            let kv_pair = self.inner.next().await.expect("failed to call iter next");
+            trace!(ITER_NEXT, self.record_id, kv_pair);
+            Ok(kv_pair)
+        }
     }
 }

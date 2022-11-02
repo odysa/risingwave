@@ -26,9 +26,7 @@ use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{HummockStorage, SstableStore, TieredCache, TieredCacheMetricsBuilder};
 use crate::memory::MemoryStateStore;
-use crate::monitor::{
-    MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics, TracedStateStore,
-};
+use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
 use crate::StateStore;
 
 /// The type erased [`StateStore`].

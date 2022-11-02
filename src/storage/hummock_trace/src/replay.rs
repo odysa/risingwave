@@ -13,14 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::ops::Bound;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crossbeam::channel::{bounded, Receiver, Sender};
-use crossbeam::queue::SegQueue;
-use futures::future::join_all;
 #[cfg(test)]
 use mockall::automock;
 use parking_lot::RwLock;
@@ -31,8 +27,6 @@ use tokio::task::JoinHandle;
 use crate::error::Result;
 use crate::read::TraceReader;
 use crate::{Operation, ReadEpochStatus, Record, RecordId};
-
-static GLOBAL_OPS_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -87,6 +81,8 @@ impl<T: TraceReader> HummockReplay<T> {
     pub async fn simple_run(&mut self, replay: Arc<Box<dyn Replayable>>) -> Result<()> {
         let mut handle_map: HashMap<u64, JoinHandle<()>> = HashMap::new();
         let mut total: u64 = 0;
+        let iter_map: HashMap<RecordId, Box<dyn ReplayIter>> = HashMap::new();
+        let iter_map = Arc::new(RwLock::new(iter_map));
         loop {
             match self.reader.read() {
                 Ok(r) => {
@@ -95,12 +91,16 @@ impl<T: TraceReader> HummockReplay<T> {
                             let record_id = r.record_id();
                             if let Some(handle) = handle_map.remove(&record_id) {
                                 handle.await.expect("failed to wait a task");
+                            } else {
+                                println!("handle not found {}", record_id);
                             }
                         }
+                        Operation::Result(_) => {}
                         _ => {
+                            let iter_map = iter_map.clone();
                             let replay = replay.clone();
                             let record_id = r.record_id();
-                            let handle = tokio::spawn(handle_record(r, replay));
+                            let handle = tokio::spawn(handle_record(r, replay, iter_map));
                             handle_map.insert(record_id, handle);
                             total += 1;
                         }
@@ -109,7 +109,10 @@ impl<T: TraceReader> HummockReplay<T> {
                         println!("replayed {} ops", total);
                     }
                 }
-                Err(_) => break,
+                Err(e) => {
+                    println!("reader finished because {:?}", e);
+                    break;
+                }
             }
         }
         Ok(())
@@ -117,20 +120,15 @@ impl<T: TraceReader> HummockReplay<T> {
 
     pub async fn run(&mut self) -> Result<()> {
         let total: u64 = 0;
-        loop {
-            match self.reader.read() {
-                Ok(r) => {
-                    match r.local_id() {
-                        TraceLocalId::Actor(_) => {}
-                        TraceLocalId::Executor(_) => {}
-                        TraceLocalId::None => {}
-                    };
+        while let Ok(r) = self.reader.read() {
+            match r.local_id() {
+                TraceLocalId::Actor(_) => {}
+                TraceLocalId::Executor(_) => {}
+                TraceLocalId::None => {}
+            };
 
-                    if total % 10000 == 0 {
-                        println!("replayed {} ops", total);
-                    }
-                }
-                Err(_) => break,
+            if total % 10000 == 0 {
+                println!("replayed {} ops", total);
             }
         }
         Ok(())
@@ -219,8 +217,12 @@ async fn replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayab
     }
 }
 
-async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
-    let Record(_, _, op) = r;
+async fn handle_record(
+    r: Record,
+    replay: Arc<Box<dyn Replayable>>,
+    iter_map: Arc<RwLock<HashMap<RecordId, Box<dyn ReplayIter>>>>,
+) {
+    let Record(_, record_id, op) = r;
     match op {
         Operation::Get(key, check_bloom_filter, epoch, table_id, retention_seconds) => {
             replay
@@ -228,7 +230,7 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
                 .await;
         }
         Operation::Ingest(kv_pairs, epoch, table_id) => {
-            let _ = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
+            let _size = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
         }
         Operation::Iter(
             prefix_hint,
@@ -238,7 +240,7 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
             table_id,
             retention_seconds,
         ) => {
-            let iter = replay
+            let _iter = replay
                 .iter(
                     prefix_hint,
                     left_bound,
@@ -256,7 +258,9 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
         Operation::Seal(epoch_id, is_checkpoint) => {
             replay.seal_epoch(epoch_id, is_checkpoint).await;
         }
-        Operation::IterNext(_, _) => {}
+        Operation::IterNext(id, _) => {
+            let mut iter_map = iter_map.write();
+        }
         Operation::MetaMessage(resp) => {
             let op = resp.0.operation();
             if let Some(info) = resp.0.info {
@@ -265,10 +269,7 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
         }
         Operation::UpdateVersion(_) => todo!(),
         Operation::Finish => unreachable!(),
-        Operation::WaitEpoch(_) => {
-            // let f = replay.wait_epoch(epoch);
-            // f.await.unwrap();
-        }
+        Operation::WaitEpoch(_) => {}
         _ => {}
     }
 }

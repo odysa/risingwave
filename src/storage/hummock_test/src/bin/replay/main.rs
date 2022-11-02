@@ -135,8 +135,7 @@ async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
     .await
     .expect("fail to create a HummockStorage object");
 
-    let version_update_tx = storage.get_version_update_notifier_tx();
-    let replay_interface = HummockInterface::new(storage, notifier, version_update_tx.subscribe());
+    let replay_interface = HummockInterface::new(storage, notifier);
 
     Ok(Box::new(replay_interface))
 }

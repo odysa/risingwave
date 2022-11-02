@@ -24,7 +24,6 @@ use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, SyncResult, WriteOptions};
 use risingwave_storage::{StateStore, StateStoreIter};
-use tokio::sync::watch::Receiver as WatchReceiver;
 
 pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (Bytes, Bytes)>>(I);
 
@@ -45,20 +44,11 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)> + Send + Sync> ReplayIter for Humm
 pub(crate) struct HummockInterface {
     store: HummockStorage,
     notifier: NotificationManagerRef<MemStore>,
-    version_update_listener: WatchReceiver<u64>,
 }
 
 impl HummockInterface {
-    pub(crate) fn new(
-        store: HummockStorage,
-        notifier: NotificationManagerRef<MemStore>,
-        version_update_listener: WatchReceiver<u64>,
-    ) -> Self {
-        Self {
-            store,
-            notifier,
-            version_update_listener,
-        }
+    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
+        Self { store, notifier }
     }
 }
 
@@ -86,9 +76,7 @@ impl Replayable for HummockInterface {
             .await
             .expect("failed to get a value");
 
-        let v = value.map(|b| b.to_vec());
-        println!("get result {:?}", v);
-        v
+        value.map(|b| b.to_vec())
     }
 
     async fn ingest(
@@ -108,7 +96,6 @@ impl Replayable for HummockInterface {
                 )
             })
             .collect();
-
         let size = self
             .store
             .ingest_batch(
@@ -120,7 +107,6 @@ impl Replayable for HummockInterface {
             )
             .await
             .expect("failed to ingest_batch");
-
         Ok(size)
     }
 
@@ -162,12 +148,7 @@ impl Replayable for HummockInterface {
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
         let prev_version_id = match &info {
             Info::HummockVersionDeltas(_) => {
-                return Ok(0);
-                // if let Some(delta) = deltas.version_deltas.last() {
-                //     Some(delta.prev_id)
-                // } else {
-                //     None
-                // }
+                return Ok(0); // don't replay version deltas update for now
             }
             _ => None,
         };

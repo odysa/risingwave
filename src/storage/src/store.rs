@@ -20,7 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
-use crate::monitor::{MonitoredStateStore, StateStoreMetrics, TracedStateStore};
+use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 

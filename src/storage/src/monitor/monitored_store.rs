@@ -21,7 +21,7 @@ use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
-use super::{StateStoreMetrics, TracedStateStore, TracedStateStoreIter};
+use super::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
@@ -136,10 +136,7 @@ impl<S> StateStore for MonitoredStateStore<S>
 where
     S: StateStore,
 {
-    #[cfg(not(hm_trace))]
     type Iter = MonitoredStateStoreIter<S::Iter>;
-    #[cfg(hm_trace)]
-    type Iter = MonitoredStateStoreIter<TracedStateStoreIter<S::Iter>>;
 
     define_state_store_associated_type!();
 
@@ -323,7 +320,10 @@ impl MonitoredStateStore<HummockStorage> {
 
 /// A state store iterator wrapper for monitoring metrics.
 pub struct MonitoredStateStoreIter<I> {
+    #[cfg(not(hm_trace))]
     inner: I,
+    #[cfg(hm_trace)]
+    inner: TracedStateStoreIter<I>,
     total_items: usize,
     total_size: usize,
     start_time: minstant::Instant,
