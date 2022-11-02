@@ -138,7 +138,9 @@ impl Replayable for HummockInterface {
     }
 
     async fn sync(&self, id: u64) {
+        println!("begin sync {}", id);
         let _: SyncResult = self.store.sync(id).await.unwrap();
+        println!("end sync");
     }
 
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
@@ -148,7 +150,9 @@ impl Replayable for HummockInterface {
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
         let prev_version_id = match &info {
             Info::HummockVersionDeltas(_) => {
-                return Ok(0); // don't replay version deltas update for now
+                // Some(deltas.version_deltas.last().unwrap().prev_id) // don't replay version deltas
+                                                                    // update for now
+                return Ok(0);
             }
             _ => None,
         };
