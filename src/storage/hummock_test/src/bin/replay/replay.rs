@@ -15,9 +15,8 @@
 use std::ops::Bound;
 
 use bytes::Bytes;
-use futures::channel::mpsc::Receiver;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_trace::{ReadEpochStatus, ReplayIter, Replayable, Result, TraceError};
+use risingwave_hummock_trace::{ReadEpochStatus, ReplayIter, Replayable, Result};
 use risingwave_meta::manager::NotificationManagerRef;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
@@ -85,7 +84,8 @@ impl Replayable for HummockInterface {
                 },
             )
             .await
-            .unwrap();
+            .expect("failed to get a value");
+
         value.map(|b| b.to_vec())
     }
 
@@ -95,7 +95,6 @@ impl Replayable for HummockInterface {
         epoch: u64,
         table_id: u32,
     ) -> Result<usize> {
-        println!("ingest {}", epoch);
         let kv_pairs = kv_pairs
             .drain(..)
             .map(|(key, value)| {
@@ -132,7 +131,7 @@ impl Replayable for HummockInterface {
         table_id: u32,
         retention_seconds: Option<u32>,
     ) -> Result<Box<dyn ReplayIter>> {
-        let result = self
+        let iter = self
             .store
             .iter(
                 prefix_hint,
@@ -143,18 +142,15 @@ impl Replayable for HummockInterface {
                     retention_seconds,
                 },
             )
-            .await;
+            .await
+            .expect("failed to create iter");
 
-        if let Ok(iter) = result {
-            let iter = HummockReplayIter::new(iter);
-            Ok(Box::new(iter))
-        } else {
-            Err(TraceError::IterFailed())
-        }
+        let iter = HummockReplayIter::new(iter);
+        Ok(Box::new(iter))
     }
 
     async fn sync(&self, id: u64) {
-        let res: SyncResult = self.store.sync(id).await.unwrap();
+        let _: SyncResult = self.store.sync(id).await.unwrap();
     }
 
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
@@ -163,21 +159,20 @@ impl Replayable for HummockInterface {
 
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
         let prev_version_id = match &info {
-            Info::HummockVersionDeltas(deltas) => {
-                if let Some(delta) = deltas.version_deltas.last() {
-                    Some(delta.prev_id)
-                } else {
-                    None
-                }
+            Info::HummockVersionDeltas(_) => {
+                return Ok(0);
+                // if let Some(delta) = deltas.version_deltas.last() {
+                //     Some(delta.prev_id)
+                // } else {
+                //     None
+                // }
             }
             _ => None,
         };
         let version = self.notifier.notify_hummock(op, info).await;
         // wait till version updated
         if let Some(prev_version_id) = prev_version_id {
-            println!("waiting fo version update");
-            let cur_id = self.store.wait_version_update(prev_version_id).await;
-            println!("update done before {}, now {}", prev_version_id, cur_id);
+            let _ = self.store.wait_version_update(prev_version_id).await;
         }
         Ok(version)
     }

@@ -83,6 +83,7 @@ impl ObserverState for HummockObserverNode {
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         #[cfg(hm_trace)]
         trace!(METAMSG, resp);
+
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 self.handle_catalog_snapshot(snapshot.tables);
