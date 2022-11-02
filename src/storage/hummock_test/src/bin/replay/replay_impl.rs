@@ -86,7 +86,9 @@ impl Replayable for HummockInterface {
             .await
             .expect("failed to get a value");
 
-        value.map(|b| b.to_vec())
+        let v = value.map(|b| b.to_vec());
+        println!("get result {:?}", v);
+        v
     }
 
     async fn ingest(

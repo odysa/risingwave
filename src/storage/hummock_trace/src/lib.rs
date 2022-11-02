@@ -21,6 +21,7 @@ mod macros;
 mod read;
 pub mod record;
 mod replay;
+mod replay_worker;
 mod write;
 
 pub use collector::*;

@@ -114,6 +114,109 @@ impl<T: TraceReader> HummockReplay<T> {
         }
         Ok(())
     }
+
+    pub async fn run(&mut self) -> Result<()> {
+        let total: u64 = 0;
+        loop {
+            match self.reader.read() {
+                Ok(r) => {
+                    match r.local_id() {
+                        TraceLocalId::Actor(_) => {}
+                        TraceLocalId::Executor(_) => {}
+                        TraceLocalId::None => {}
+                    };
+
+                    if total % 10000 == 0 {
+                        println!("replayed {} ops", total);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayable>>) {
+    let mut iters_map = HashMap::new();
+    loop {
+        if let Ok(msg) = rx.recv() {
+            match msg {
+                ReplayMessage::Task(record_group) => {
+                    for r in record_group {
+                        let Record(_, record_id, op) = r;
+                        match op {
+                            Operation::Get(
+                                key,
+                                check_bloom_filter,
+                                epoch,
+                                table_id,
+                                retention_seconds,
+                            ) => {
+                                replay
+                                    .get(
+                                        key,
+                                        check_bloom_filter,
+                                        epoch,
+                                        table_id,
+                                        retention_seconds,
+                                    )
+                                    .await;
+                            }
+                            Operation::Ingest(kv_pairs, epoch, table_id) => {
+                                let _ = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
+                            }
+                            Operation::Iter(
+                                prefix_hint,
+                                left_bound,
+                                right_bound,
+                                epoch,
+                                table_id,
+                                retention_seconds,
+                            ) => {
+                                let iter = replay
+                                    .iter(
+                                        prefix_hint,
+                                        left_bound,
+                                        right_bound,
+                                        epoch,
+                                        table_id,
+                                        retention_seconds,
+                                    )
+                                    .await
+                                    .unwrap();
+                                iters_map.insert(record_id, iter);
+                            }
+                            Operation::Sync(epoch_id) => {
+                                replay.sync(epoch_id).await;
+                            }
+                            Operation::Seal(epoch_id, is_checkpoint) => {
+                                replay.seal_epoch(epoch_id, is_checkpoint).await;
+                            }
+                            Operation::IterNext(id, expected) => {
+                                let iter = iters_map.get_mut(&id);
+                                if let Some(iter) = iter {
+                                    let actual = iter.next().await;
+                                    assert_eq!(actual, expected, "iter next value do not match");
+                                }
+                            }
+                            Operation::MetaMessage(resp) => {
+                                let op = resp.0.operation();
+                                if let Some(info) = resp.0.info {
+                                    replay.notify_hummock(info, op).await.unwrap();
+                                }
+                            }
+                            Operation::UpdateVersion(_) => todo!(),
+                            Operation::Finish => unreachable!(),
+                            Operation::WaitEpoch(_) => {}
+                            _ => {}
+                        }
+                    }
+                }
+                ReplayMessage::Fin => todo!(),
+            }
+        }
+    }
 }
 
 async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
@@ -153,7 +256,7 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
         Operation::Seal(epoch_id, is_checkpoint) => {
             replay.seal_epoch(epoch_id, is_checkpoint).await;
         }
-        Operation::IterNext(id, expected) => {}
+        Operation::IterNext(_, _) => {}
         Operation::MetaMessage(resp) => {
             let op = resp.0.operation();
             if let Some(info) = resp.0.info {
@@ -162,7 +265,7 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
         }
         Operation::UpdateVersion(_) => todo!(),
         Operation::Finish => unreachable!(),
-        Operation::WaitEpoch(epoch) => {
+        Operation::WaitEpoch(_) => {
             // let f = replay.wait_epoch(epoch);
             // f.await.unwrap();
         }
@@ -173,8 +276,7 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
 type ReplayGroup = Vec<Record>;
 
 enum ReplayMessage {
-    Group(Vec<ReplayGroup>),
-    Resp(Vec<Record>),
+    Task(ReplayGroup),
     Fin,
 }
 

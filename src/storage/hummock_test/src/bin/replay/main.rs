@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-mod replay;
+mod replay_impl;
 
 use std::fs::File;
 use std::io::BufReader;
@@ -19,7 +19,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use replay::HummockInterface;
+use replay_impl::HummockInterface;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_test::test_utils::get_replay_notification_client;
 use risingwave_hummock_trace::{
