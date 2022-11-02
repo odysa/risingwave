@@ -162,17 +162,17 @@ pub struct TraceSpan {
 }
 
 impl TraceSpan {
-    pub(crate) fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
+    pub fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
         Self { tx, id }
     }
 
-    pub(crate) fn send(&self, op: Operation, local_id: TraceLocalId) {
+    pub fn send(&self, op: Operation, local_id: TraceLocalId) {
         self.tx
             .send(RecordMsg::Record(Record::new(local_id, self.id, op)))
             .expect("failed to log record");
     }
 
-    pub(crate) fn finish(&self) {
+    pub fn finish(&self) {
         self.tx
             .send(RecordMsg::Record(Record::new_local_none(
                 self.id,

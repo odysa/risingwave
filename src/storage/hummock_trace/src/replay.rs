@@ -64,6 +64,7 @@ pub trait Replayable: Send + Sync {
     async fn update_version(&self, version_id: u64);
     async fn wait_epoch(&self, epoch: ReadEpochStatus) -> Result<()>;
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+    async fn wait_version_update(&self);
 }
 
 #[async_trait::async_trait]
@@ -278,8 +279,8 @@ async fn handle_record(r: Record, replay: Arc<Box<dyn Replayable>>) {
             let op = resp.0.operation();
             if let Some(info) = resp.0.info {
                 match &info {
-                    Info::HummockVersionDeltas(v) => {
-                        println!("update version {:?}!", v);
+                    Info::HummockVersionDeltas(deltas) => {
+                        println!("update version {:?}!", deltas);
                     }
                     _ => {}
                 }

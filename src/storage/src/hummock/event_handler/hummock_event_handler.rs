@@ -375,7 +375,6 @@ impl HummockEventHandler {
         // TODO: remove it
         self.local_version_manager
             .try_update_pinned_version(version_payload);
-
         println!("version update done");
     }
 

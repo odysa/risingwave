@@ -110,15 +110,17 @@ pub enum Operation {
     Result(TraceOpResult),
 }
 
+type TraceResult<T> = Option<T>;
+
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum TraceOpResult {
-    Get(Option<Vec<u8>>),
-    Ingest(Option<usize>),
-    Iter(Option<()>),
-    Sync(Option<()>),
-    Seal(Option<()>),
-    WaitEpoch(Option<()>),
-    NotifyHummock(Option<()>),
+    Get(TraceResult<Option<Vec<u8>>>),
+    Ingest(TraceResult<usize>),
+    Iter(TraceResult<()>),
+    Sync(TraceResult<()>),
+    Seal(TraceResult<()>),
+    WaitEpoch(TraceResult<()>),
+    NotifyHummock(TraceResult<()>),
 }
 
 /// We must derive serialization trait for this

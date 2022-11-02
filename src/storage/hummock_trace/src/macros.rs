@@ -15,7 +15,7 @@
 #[macro_export]
 macro_rules! trace {
     (GET, $key:ident, $bloom_filter:ident, $opt:ident) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        $crate::collector::TraceSpan::new_global_op(
             $crate::record::Operation::Get(
                 $key.to_vec(),
                 $bloom_filter,
@@ -27,7 +27,7 @@ macro_rules! trace {
         );
     };
     (INGEST, $kvs:ident, $opt:ident) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        $crate::collector::TraceSpan::new_global_op(
             $crate::record::Operation::Ingest(
                 $kvs.iter()
                     .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|v| v.to_vec())))
@@ -91,6 +91,29 @@ macro_rules! trace {
                 $epoch.clone(),
             )),
             risingwave_common::hm_trace::TraceLocalId::None,
+        );
+    };
+}
+
+#[macro_export]
+macro_rules! trace_result {
+    (GET, $span:ident, $result:ident) => {
+        // convert type to Option<Option<Vec<u8>>>
+        let res = $result
+            .as_ref()
+            .map(Clone::clone)
+            .ok()
+            .map(|b| b.map(|c| c.to_vec()));
+        $span.send(
+            $crate::record::Operation::Result(TraceOpResult::Get(res)),
+            risingwave_common::hm_trace::task_local_get(),
+        );
+    };
+    (INGEST, $span:ident, $result:ident) => {
+        let res = $result.as_ref().map(Clone::clone).ok();
+        $span.send(
+            $crate::record::Operation::Result(TraceOpResult::Ingest(res)),
+            risingwave_common::hm_trace::task_local_get(),
         );
     };
 }

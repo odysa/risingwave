@@ -73,7 +73,6 @@ impl ObserverState for HummockObserverNode {
             }
 
             _ => {
-                println!("error resp {:?}", resp);
                 panic!("error type notification");
             }
         }

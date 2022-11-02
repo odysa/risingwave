@@ -191,7 +191,6 @@ impl HummockStorageCore {
 
         for local_sst in staging_sst {
             table_counts += 1;
-
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 &local_sst,
@@ -218,6 +217,7 @@ impl HummockStorageCore {
                         read_options.table_id,
                         &(key..=key),
                     );
+                    println!("sst info {:?}", sstable_infos);
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(

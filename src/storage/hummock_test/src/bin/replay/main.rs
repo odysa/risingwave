@@ -71,7 +71,7 @@ async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
         share_buffers_sync_parallelism: 2,
         share_buffer_compaction_worker_threads_number: 1,
         shared_buffer_capacity_mb: 64,
-        data_directory: "hummock_001".to_string(),
+        data_directory: "hummock_002".to_string(),
         write_conflict_detection_enabled: true,
         block_cache_capacity_mb: 64,
         meta_cache_capacity_mb: 64,
@@ -125,19 +125,18 @@ async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
         )
     };
 
-    let future = HummockStorage::new(
+    let storage = HummockStorage::new(
         config,
         sstable_store,
         hummock_meta_client.clone(),
         notification_client,
         state_store_stats,
-    );
+    )
+    .await
+    .expect("fail to create a HummockStorage object");
 
-    let storage = future
-        .await
-        .expect("fail to create a HummockStorage object");
-
-    let replay_interface = HummockInterface::new(storage, notifier);
+    let version_update_tx = storage.get_version_update_notifier_tx();
+    let replay_interface = HummockInterface::new(storage, notifier, version_update_tx.subscribe());
 
     Ok(Box::new(replay_interface))
 }

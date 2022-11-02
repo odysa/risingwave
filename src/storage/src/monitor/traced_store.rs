@@ -1,6 +1,9 @@
 use bytes::Bytes;
 use futures::Future;
-use risingwave_hummock_trace::{init_collector, trace, RecordId};
+use risingwave_common::hm_trace::TraceLocalId;
+use risingwave_hummock_trace::{
+    init_collector, trace, trace_result, Operation, RecordId, TraceOpResult, TraceSpan,
+};
 
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -53,10 +56,10 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         read_options: crate::store::ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            trace!(GET, key, check_bloom_filter, read_options);
-
-            let res = self.inner.get(key, check_bloom_filter, read_options).await;
-            // let v = res.as_ref().ok().clone();
+            let span: TraceSpan = trace!(GET, key, check_bloom_filter, read_options);
+            let res: StorageResult<Option<Bytes>> =
+                self.inner.get(key, check_bloom_filter, read_options).await;
+            trace_result!(GET, span, res);
             res
         }
     }
@@ -94,8 +97,10 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         write_options: crate::store::WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            trace!(INGEST, kv_pairs, write_options);
-            self.inner.ingest_batch(kv_pairs, write_options).await
+            let span: TraceSpan = trace!(INGEST, kv_pairs, write_options);
+            let res: StorageResult<usize> = self.inner.ingest_batch(kv_pairs, write_options).await;
+            trace_result!(INGEST, span, res);
+            res
         }
     }
 
