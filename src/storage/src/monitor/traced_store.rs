@@ -3,20 +3,28 @@ use futures::Future;
 use risingwave_hummock_trace::{init_collector, trace, RecordId};
 
 use crate::error::StorageResult;
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore};
 
 #[derive(Clone)]
-pub struct TracedStateStore<S: StateStore> {
+pub struct TracedStateStore<S> {
     inner: S,
 }
 
-impl<S: StateStore> TracedStateStore<S> {
+impl<S> TracedStateStore<S> {
     pub fn new(inner: S) -> Self {
         init_collector();
         Self { inner }
     }
 
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+}
+
+impl<S: StateStore> TracedStateStore<S> {
     async fn traced_iter<'a, I>(
         &self,
         inner: I,
@@ -27,14 +35,14 @@ impl<S: StateStore> TracedStateStore<S> {
     {
         let inner = inner.await?;
 
-        let traced = TraceStateStoreIter { inner, record_id };
+        let traced = TracedStateStoreIter { inner, record_id };
 
         Ok(traced)
     }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
-    type Iter = TraceStateStoreIter<S::Iter>;
+    type Iter = TracedStateStoreIter<S::Iter>;
 
     define_state_store_associated_type!();
 
@@ -60,7 +68,11 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         limit: Option<usize>,
         read_options: crate::store::ReadOptions,
     ) -> Self::ScanFuture<'_> {
-        self.inner.scan(prefix_hint, key_range, limit, read_options)
+        async move {
+            self.inner
+                .scan(prefix_hint, key_range, limit, read_options)
+                .await
+        }
     }
 
     fn backward_scan(
@@ -69,7 +81,11 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         limit: Option<usize>,
         read_options: crate::store::ReadOptions,
     ) -> Self::BackwardScanFuture<'_> {
-        self.inner.backward_scan(key_range, limit, read_options)
+        async move {
+            self.inner
+                .backward_scan(key_range, limit, read_options)
+                .await
+        }
     }
 
     fn ingest_batch(
@@ -77,8 +93,10 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         kv_pairs: Vec<(bytes::Bytes, crate::storage_value::StorageValue)>,
         write_options: crate::store::WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
-        trace!(INGEST, kv_pairs, write_options);
-        self.inner.ingest_batch(kv_pairs, write_options)
+        async move {
+            trace!(INGEST, kv_pairs, write_options);
+            self.inner.ingest_batch(kv_pairs, write_options).await
+        }
     }
 
     fn iter(
@@ -106,18 +124,22 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         &self,
         epoch: risingwave_hummock_sdk::HummockReadEpoch,
     ) -> Self::WaitEpochFuture<'_> {
-        trace!(WAITEPOCH, epoch);
-        self.inner.try_wait_epoch(epoch)
+        async move {
+            trace!(WAITEPOCH, epoch);
+            self.inner.try_wait_epoch(epoch).await
+        }
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-        trace!(SYNC, epoch);
-        self.inner.sync(epoch)
+        async move {
+            trace!(SYNC, epoch);
+            self.inner.sync(epoch).await
+        }
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
         trace!(SEAL, epoch, is_checkpoint);
-        self.inner.seal_epoch(epoch, is_checkpoint)
+        self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
@@ -125,7 +147,17 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     }
 }
 
-pub struct TraceStateStoreIter<I>
+impl TracedStateStore<HummockStorage> {
+    pub fn sstable_store(&self) -> SstableStoreRef {
+        self.inner.sstable_store()
+    }
+
+    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
+        self.inner.sstable_id_manager().clone()
+    }
+}
+
+pub struct TracedStateStoreIter<I>
 where
     I: StateStoreIter<Item = (Bytes, Bytes)>,
 {
@@ -133,7 +165,7 @@ where
     record_id: RecordId,
 }
 
-impl<I> StateStoreIter for TraceStateStoreIter<I>
+impl<I> StateStoreIter for TracedStateStoreIter<I>
 where
     I: StateStoreIter<Item = (Bytes, Bytes)>,
 {
@@ -143,6 +175,6 @@ where
         impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        self.inner.next()
+        async move { self.inner.next().await }
     }
 }

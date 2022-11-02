@@ -21,7 +21,7 @@ use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
-use super::StateStoreMetrics;
+use super::{StateStoreMetrics, TracedStateStore, TracedStateStoreIter};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
@@ -32,13 +32,20 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
+    #[cfg(not(hm_trace))]
     inner: S,
+
+    #[cfg(hm_trace)]
+    inner: TracedStateStore<S>,
 
     stats: Arc<StateStoreMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
+        #[cfg(hm_trace)]
+        let inner = TracedStateStore::new(inner);
+
         Self { inner, stats }
     }
 }
@@ -47,6 +54,7 @@ impl<S> MonitoredStateStore<S>
 where
     S: StateStore,
 {
+    #[cfg(not(hm_trace))]
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
@@ -78,11 +86,48 @@ where
         Ok(monitored)
     }
 
+    #[cfg(hm_trace)]
+    async fn monitored_iter<'a, I>(
+        &self,
+        iter: I,
+    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
+    where
+        I: Future<Output = StorageResult<TracedStateStoreIter<S::Iter>>>,
+    {
+        // start time takes iterator build time into account
+        let start_time = minstant::Instant::now();
+
+        // wait for iterator creation (e.g. seek)
+        let iter = iter
+            .verbose_stack_trace("store_create_iter")
+            .await
+            .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
+
+        // statistics of iter in process count to estimate the read ops in the same time
+        self.stats.iter_in_process_counts.inc();
+
+        // create a monitored iterator to collect metrics
+        let monitored = MonitoredStateStoreIter {
+            inner: iter,
+            total_items: 0,
+            total_size: 0,
+            start_time,
+            scan_time: minstant::Instant::now(),
+            stats: self.stats.clone(),
+        };
+        Ok(monitored)
+    }
+
     pub fn stats(&self) -> Arc<StateStoreMetrics> {
         self.stats.clone()
     }
 
     pub fn inner(&self) -> &S {
+        #[cfg(hm_trace)]
+        {
+            &self.inner.inner()
+        }
+        #[cfg(not(hm_trace))]
         &self.inner
     }
 }
@@ -91,7 +136,10 @@ impl<S> StateStore for MonitoredStateStore<S>
 where
     S: StateStore,
 {
+    #[cfg(not(hm_trace))]
     type Iter = MonitoredStateStoreIter<S::Iter>;
+    #[cfg(hm_trace)]
+    type Iter = MonitoredStateStoreIter<TracedStateStoreIter<S::Iter>>;
 
     define_state_store_associated_type!();
 
