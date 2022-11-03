@@ -67,18 +67,22 @@ pub trait ReplayIter: Send + Sync {
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
+    replay: Arc<Box<dyn Replayable>>,
 }
 
 impl<T: TraceReader> HummockReplay<T> {
-    pub fn new(reader: T) -> Self {
-        Self { reader }
+    pub fn new(reader: T, replay: Box<dyn Replayable>) -> Self {
+        Self {
+            reader,
+            replay: Arc::new(replay),
+        }
     }
 
-    pub async fn run(&mut self, replay: Box<dyn Replayable>) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         let mut workers: HashMap<String, WorkerHandler> = HashMap::new();
         let mut total_ops: u64 = 0;
         let mut record_worker_map: HashMap<RecordId, String> = HashMap::new();
-        let replay = Arc::new(replay);
+
         while let Ok(r) = self.reader.read() {
             let local_id = r.local_id();
             let record_id = r.record_id();
@@ -101,7 +105,7 @@ impl<T: TraceReader> HummockReplay<T> {
                         let (req_tx, req_rx) = unbounded_channel();
                         let (resp_tx, resp_rx) = unbounded_channel();
                         let (res_tx, res_rx) = unbounded_channel();
-                        let replay = replay.clone();
+                        let replay = self.replay.clone();
                         let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, replay));
                         WorkerHandler {
                             req_tx,
@@ -372,8 +376,8 @@ mod tests {
             .return_const(());
 
         let mock_replay = Box::new(mock_replay);
-        let mut replay = HummockReplay::new(mock_reader);
+        let mut replay = HummockReplay::new(mock_reader, mock_replay);
 
-        replay.run(mock_replay).await.unwrap();
+        replay.run().await.unwrap();
     }
 }
