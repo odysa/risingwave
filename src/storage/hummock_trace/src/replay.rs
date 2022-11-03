@@ -74,11 +74,11 @@ impl<T: TraceReader> HummockReplay<T> {
         Self { reader }
     }
 
-    pub async fn run(&mut self, replay: Arc<Box<dyn Replayable>>) -> Result<()> {
+    pub async fn run(&mut self, replay: Box<dyn Replayable>) -> Result<()> {
         let mut workers: HashMap<String, WorkerHandler> = HashMap::new();
         let mut total_ops: u64 = 0;
         let mut record_worker_map: HashMap<RecordId, String> = HashMap::new();
-
+        let replay = Arc::new(replay);
         while let Ok(r) = self.reader.read() {
             let local_id = r.local_id();
             let record_id = r.record_id();
@@ -93,8 +93,6 @@ impl<T: TraceReader> HummockReplay<T> {
                     if let Some(worker_id) = record_worker_map.remove(&record_id) {
                         if let Some(handler) = workers.get_mut(&worker_id) {
                             handler.wait_resp().await;
-                        } else {
-                            println!("worker {} not found", worker_id);
                         }
                     }
                 }
@@ -206,21 +204,21 @@ async fn replay_worker(
                                         retention_seconds,
                                     )
                                     .await
-                                    .unwrap();
+                                    .expect("failed to create a iter");
                                 iters_map.insert(record_id, iter);
                             }
                             Operation::Sync(epoch_id) => {
-                                replay.sync(epoch_id).await.unwrap();
+                                replay.sync(epoch_id).await.expect("failed to sync");
                             }
                             Operation::Seal(epoch_id, is_checkpoint) => {
                                 replay.seal_epoch(epoch_id, is_checkpoint).await;
                             }
                             Operation::IterNext(id, expected) => {
-                                let iter = iters_map.get_mut(&id);
-                                if let Some(iter) = iter {
-                                    let actual = iter.next().await;
-                                    assert_eq!(actual, expected, "iter next value do not match");
-                                }
+                                let iter = iters_map.get_mut(&id).expect("iter not in worker");
+                                // if let Some(iter) = iter {
+                                let actual = iter.next().await;
+                                assert_eq!(actual, expected, "iter next value do not match");
+                                // }
                             }
                             Operation::MetaMessage(resp) => {
                                 let op = resp.0.operation();
@@ -228,8 +226,7 @@ async fn replay_worker(
                                     replay.notify_hummock(info, op).await.unwrap();
                                 }
                             }
-                            Operation::Finish => unreachable!(),
-                            _ => {}
+                            _ => unreachable!(),
                         }
                     }
                     tx.send(()).expect("failed to done task");
@@ -272,82 +269,111 @@ impl WorkerHandler {
 
 type ReplayGroup = Vec<Record>;
 
+type WorkerResponse = ();
+
 #[derive(Debug)]
 enum ReplayRequest {
     Task(ReplayGroup),
     Fin,
 }
 
-type WorkerResponse = ();
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
 
-// #[cfg(test)]
-// mod tests {
-//     use mockall::predicate;
+    use mockall::predicate;
 
-//     use super::*;
-//     use crate::MockTraceReader;
+    use super::*;
+    use crate::MockTraceReader;
 
-//     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
-//     async fn test_replay() {
-//         let mut mock_reader = MockTraceReader::new();
+    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    async fn test_replay() {
+        let mut mock_reader = MockTraceReader::new();
+        let get_result = vec![54, 32, 198, 236, 24];
+        let ingest_result = 536248723;
 
-//         let mut i = 0;
+        let sync_id = 4561245432;
+        let seal_id = 5734875243;
+        let seal_checkpoint = true;
+        let mut records: VecDeque<Result<Record>> = VecDeque::from(vec![
+            Ok(Record::new_local_none(
+                0,
+                Operation::Get(vec![0], true, 0, 0, None),
+            )),
+            Ok(Record::new_local_none(
+                1,
+                Operation::Get(vec![1], true, 0, 0, None),
+            )),
+            Ok(Record::new_local_none(
+                2,
+                Operation::Get(vec![0], true, 0, 0, None),
+            )),
+            Ok(Record::new_local_none(
+                0,
+                Operation::Result(TraceOpResult::Get(Some(Some(get_result.clone())))),
+            )),
+            Ok(Record::new_local_none(
+                0,
+                Operation::Result(TraceOpResult::Get(Some(Some(get_result.clone())))),
+            )),
+            Ok(Record::new_local_none(
+                0,
+                Operation::Result(TraceOpResult::Get(Some(Some(get_result.clone())))),
+            )),
+            Ok(Record::new_local_none(2, Operation::Finish)),
+            Ok(Record::new_local_none(1, Operation::Finish)),
+            Ok(Record::new_local_none(0, Operation::Finish)),
+            Ok(Record::new_local_none(
+                3,
+                Operation::Ingest(vec![(vec![1], Some(vec![1]))], 0, 0),
+            )),
+            Ok(Record::new_local_none(
+                0,
+                Operation::Result(TraceOpResult::Ingest(Some(ingest_result))),
+            )),
+            Ok(Record::new_local_none(4, Operation::Sync(sync_id))),
+            Ok(Record::new_local_none(
+                5,
+                Operation::Seal(seal_id, seal_checkpoint),
+            )),
+            Ok(Record::new_local_none(3, Operation::Finish)),
+            Ok(Record::new_local_none(4, Operation::Finish)),
+            Ok(Record::new_local_none(5, Operation::Finish)),
+            Err(crate::TraceError::FinRecord(5)), // intentional error
+        ]);
 
-//         let f = move || {
-//             let r = match i {
-//                 0 => Ok(Record::new_local_none(
-//                     0,
-//                     Operation::Get(vec![0], true, 0, 0, None),
-//                 )),
-//                 1 => Ok(Record::new_local_none(
-//                     1,
-//                     Operation::Get(vec![1], true, 0, 0, None),
-//                 )),
-//                 2 => Ok(Record::new_local_none(
-//                     2,
-//                     Operation::Get(vec![0], true, 0, 0, None),
-//                 )),
-//                 3 => Ok(Record::new_local_none(2, Operation::Finish)),
-//                 4 => Ok(Record::new_local_none(1, Operation::Finish)),
-//                 5 => Ok(Record::new_local_none(0, Operation::Finish)),
-//                 6 => Ok(Record::new_local_none(
-//                     3,
-//                     Operation::Ingest(vec![(vec![1], Some(vec![1]))], 0, 0),
-//                 )),
-//                 7 => Ok(Record::new_local_none(4, Operation::Sync(123))),
-//                 8 => Ok(Record::new_local_none(5, Operation::Seal(321, true))),
-//                 9 => Ok(Record::new_local_none(3, Operation::Finish)),
-//                 10 => Ok(Record::new_local_none(4, Operation::Finish)),
-//                 11 => Ok(Record::new_local_none(5, Operation::Finish)),
-//                 _ => Err(crate::TraceError::FinRecord(5)), // intentional error
-//             };
-//             i += 1;
-//             r
-//         };
+        let records_len = records.len();
+        let f = move || records.pop_front().unwrap();
 
-//         mock_reader.expect_read().times(13).returning(f);
+        mock_reader.expect_read().times(records_len).returning(f);
 
-//         let mut mock_replay = MockReplayable::new();
+        let mut mock_replay = MockReplayable::new();
 
-//         mock_replay.expect_get().times(3).return_const(vec![1]);
-//         mock_replay
-//             .expect_ingest()
-//             .times(1)
-//             .returning(|_, _, _| Ok(0));
-//         mock_replay
-//             .expect_sync()
-//             .with(predicate::eq(123))
-//             .times(1)
-//             .return_const(());
-//         mock_replay
-//             .expect_seal_epoch()
-//             .with(predicate::eq(321), predicate::eq(true))
-//             .times(1)
-//             .return_const(());
+        mock_replay
+            .expect_get()
+            .times(3)
+            .returning(move |_, _, _, _, _| Ok(Some(get_result.clone())));
 
-//         let (mut replay, join) = HummockReplay::new(mock_reader, Box::new(mock_replay));
-//         replay.run().unwrap();
+        mock_replay
+            .expect_ingest()
+            .times(1)
+            .returning(move |_, _, _| Ok(ingest_result));
 
-//         join.await.unwrap();
-//     }
-// }
+        mock_replay
+            .expect_sync()
+            .with(predicate::eq(sync_id))
+            .times(1)
+            .returning(|_| Ok(0));
+
+        mock_replay
+            .expect_seal_epoch()
+            .with(predicate::eq(seal_id), predicate::eq(seal_checkpoint))
+            .times(1)
+            .return_const(());
+
+        let mock_replay = Box::new(mock_replay);
+        let mut replay = HummockReplay::new(mock_reader);
+
+        replay.run(mock_replay).await.unwrap();
+    }
+}

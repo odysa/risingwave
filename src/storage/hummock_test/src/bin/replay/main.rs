@@ -52,7 +52,7 @@ async fn run_replay(path: &Path) -> Result<()> {
     // let (mut replayer, handle) = HummockReplay::new(reader, replay_interface);
     let mut replayer = HummockReplay::new(reader);
 
-    replayer.run(Arc::new(replay_interface)).await.unwrap();
+    replayer.run(replay_interface).await.unwrap();
 
     Ok(())
 }
