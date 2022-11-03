@@ -385,7 +385,6 @@ impl HummockEventHandler {
 impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
         loop {
-            println!("wait for req");
             let select_result = match select(
                 self.upload_handle_manager.next_finished_epoch(),
                 self.hummock_event_rx.recv().boxed(),
@@ -395,7 +394,6 @@ impl HummockEventHandler {
                 Either::Left((epoch_result, _)) => Either::Left(epoch_result),
                 Either::Right((event, _)) => Either::Right(event),
             };
-            println!("handle req {:?}", select_result);
             match select_result {
                 Either::Left(epoch_result) => {
                     let epoch = epoch_result.expect(
@@ -447,7 +445,6 @@ impl HummockEventHandler {
                     break;
                 }
             };
-            println!("handle req done");
         }
     }
 }
