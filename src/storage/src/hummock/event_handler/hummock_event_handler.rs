@@ -392,10 +392,8 @@ impl HummockEventHandler {
             )
             .await
             {
-                Either::Left((epoch_result, _)) => {
-                    Either::Left(epoch_result)},
-                Either::Right((event, _)) => {
-                    Either::Right(event)},
+                Either::Left((epoch_result, _)) => Either::Left(epoch_result),
+                Either::Right((event, _)) => Either::Right(event),
             };
             println!("handle req {:?}", select_result);
             match select_result {

@@ -520,8 +520,7 @@ impl StateStore for HummockStorage {
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
             // insert imm to uploader
-            self
-                .core
+            self.core
                 .event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .expect("failed to send imm");

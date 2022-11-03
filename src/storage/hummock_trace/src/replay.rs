@@ -16,11 +16,11 @@ use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
 #[cfg(test)]
 use mockall::automock;
 use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use crate::error::Result;
@@ -76,14 +76,7 @@ impl<T: TraceReader> HummockReplay<T> {
     }
 
     pub async fn run(&mut self, replay: Arc<Box<dyn Replayable>>) -> Result<()> {
-        let mut workers: HashMap<
-            String,
-            (
-                Sender<ReplayRequest>,
-                Receiver<WorkerResponse>,
-                JoinHandle<()>,
-            ),
-        > = HashMap::new();
+        let mut workers: HashMap<String, WorkerHandler> = HashMap::new();
         let mut total_ops: u64 = 0;
         let mut record_worker_map: HashMap<RecordId, String> = HashMap::new();
 
@@ -91,13 +84,12 @@ impl<T: TraceReader> HummockReplay<T> {
             let local_id = r.local_id();
             let record_id = r.record_id();
             let worker_id = self.get_worker_id(&local_id);
-
             match r.op() {
                 Operation::Result(_) => {}
                 Operation::Finish => {
                     if let Some(worker_id) = record_worker_map.remove(&record_id) {
-                        if let Some((_, resp_rx, _)) = workers.get(&worker_id) {
-                            resp_rx.recv().expect("failed to wait task finish");
+                        if let Some((_, resp_rx, _)) = workers.get_mut(&worker_id) {
+                            resp_rx.recv().await.expect("failed to wait task finish");
                         } else {
                             println!("worker {} not found", worker_id);
                         }
@@ -105,8 +97,8 @@ impl<T: TraceReader> HummockReplay<T> {
                 }
                 _ => {
                     let (req_tx, _, _) = workers.entry(worker_id.clone()).or_insert_with(|| {
-                        let (req_tx, req_rx) = unbounded();
-                        let (resp_tx, resp_rx) = unbounded();
+                        let (req_tx, req_rx) = unbounded_channel();
+                        let (resp_tx, resp_rx) = unbounded_channel();
                         let replay = replay.clone();
                         let handle = tokio::spawn(replay_worker(req_rx, resp_tx, replay));
                         (req_tx, resp_rx, handle)
@@ -125,6 +117,13 @@ impl<T: TraceReader> HummockReplay<T> {
                 }
             };
         }
+
+        for (req_tx, _, join) in workers.values_mut() {
+            req_tx
+                .send(ReplayRequest::Fin)
+                .expect("failed to send fin msg");
+            join.await.expect("failed to await a worker");
+        }
         Ok(())
     }
 
@@ -142,13 +141,13 @@ impl<T: TraceReader> HummockReplay<T> {
 }
 
 async fn replay_worker(
-    rx: Receiver<ReplayRequest>,
-    tx: Sender<WorkerResponse>,
+    mut rx: UnboundedReceiver<ReplayRequest>,
+    tx: UnboundedSender<WorkerResponse>,
     replay: Arc<Box<dyn Replayable>>,
 ) {
     let mut iters_map = HashMap::new();
     loop {
-        if let Ok(msg) = rx.recv() {
+        if let Some(msg) = rx.recv().await {
             match msg {
                 ReplayRequest::Task(record_group) => {
                     for r in record_group {
@@ -196,7 +195,7 @@ async fn replay_worker(
                                 iters_map.insert(record_id, iter);
                             }
                             Operation::Sync(epoch_id) => {
-                                let _result = replay.sync(epoch_id).await;
+                                replay.sync(epoch_id).await;
                             }
                             Operation::Seal(epoch_id, is_checkpoint) => {
                                 replay.seal_epoch(epoch_id, is_checkpoint).await;
@@ -226,8 +225,15 @@ async fn replay_worker(
     }
 }
 
+type WorkerHandler = (
+    UnboundedSender<ReplayRequest>,
+    UnboundedReceiver<WorkerResponse>,
+    JoinHandle<()>,
+);
+
 type ReplayGroup = Vec<Record>;
 
+#[derive(Debug)]
 enum ReplayRequest {
     Task(ReplayGroup),
     Fin,
