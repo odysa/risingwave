@@ -25,7 +25,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{Operation, ReadEpochStatus, Record, RecordId};
+use crate::{Operation, ReadEpochStatus, Record, RecordId, TraceOpResult};
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -88,22 +88,34 @@ impl<T: TraceReader> HummockReplay<T> {
                 Operation::Result(_) => {}
                 Operation::Finish => {
                     if let Some(worker_id) = record_worker_map.remove(&record_id) {
-                        if let Some((_, resp_rx, _)) = workers.get_mut(&worker_id) {
-                            resp_rx.recv().await.expect("failed to wait task finish");
+                        if let Some(handler) = workers.get_mut(&worker_id) {
+                            handler
+                                .resp_rx
+                                .recv()
+                                .await
+                                .expect("failed to wait task finish");
                         } else {
                             println!("worker {} not found", worker_id);
                         }
                     }
                 }
                 _ => {
-                    let (req_tx, _, _) = workers.entry(worker_id.clone()).or_insert_with(|| {
+                    let handler = workers.entry(worker_id.clone()).or_insert_with(|| {
                         let (req_tx, req_rx) = unbounded_channel();
                         let (resp_tx, resp_rx) = unbounded_channel();
+                        let (res_tx, res_rx) = unbounded_channel();
                         let replay = replay.clone();
-                        let handle = tokio::spawn(replay_worker(req_rx, resp_tx, replay));
-                        (req_tx, resp_rx, handle)
+                        let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, replay));
+                        WorkerHandler {
+                            req_tx,
+                            res_tx,
+                            resp_rx,
+                            join,
+                        }
                     });
-                    req_tx
+
+                    handler
+                        .req_tx
                         .send(ReplayRequest::Task(vec![r]))
                         .expect("should send task");
 
@@ -112,17 +124,17 @@ impl<T: TraceReader> HummockReplay<T> {
                     total_ops += 1;
                     if total_ops % 10000 == 0 {
                         println!("replayed {} ops", total_ops);
-                        break;
                     }
                 }
             };
         }
 
-        for (req_tx, _, join) in workers.values_mut() {
-            req_tx
+        for handler in workers.into_values() {
+            handler
+                .req_tx
                 .send(ReplayRequest::Fin)
                 .expect("failed to send fin msg");
-            join.await.expect("failed to await a worker");
+            handler.join().await;
         }
         Ok(())
     }
@@ -142,6 +154,7 @@ impl<T: TraceReader> HummockReplay<T> {
 
 async fn replay_worker(
     mut rx: UnboundedReceiver<ReplayRequest>,
+    mut res_rx: UnboundedReceiver<TraceOpResult>,
     tx: UnboundedSender<WorkerResponse>,
     replay: Arc<Box<dyn Replayable>>,
 ) {
@@ -225,11 +238,18 @@ async fn replay_worker(
     }
 }
 
-type WorkerHandler = (
-    UnboundedSender<ReplayRequest>,
-    UnboundedReceiver<WorkerResponse>,
-    JoinHandle<()>,
-);
+struct WorkerHandler {
+    req_tx: UnboundedSender<ReplayRequest>,
+    res_tx: UnboundedSender<TraceOpResult>,
+    resp_rx: UnboundedReceiver<WorkerResponse>,
+    join: JoinHandle<()>,
+}
+
+impl WorkerHandler {
+    async fn join(self) {
+        self.join.await.expect("failed to stop worker");
+    }
+}
 
 type ReplayGroup = Vec<Record>;
 
