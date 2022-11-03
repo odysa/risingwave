@@ -274,10 +274,6 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
-    pub fn get_version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {
-        self.version_update_notifier_tx.clone()
-    }
-
     pub async fn wait_version_update(&self, version_id: u64) -> u64 {
         loop {
             yield_now().await;

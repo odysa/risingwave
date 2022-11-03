@@ -651,6 +651,7 @@ impl StateStore for HummockStorage {
                     uncommitted_ssts: vec![],
                 });
             }
+            println!("send sync req");
             let (tx, rx) = oneshot::channel();
             self.hummock_event_sender
                 .send(HummockEvent::SyncEpoch {
@@ -658,6 +659,7 @@ impl StateStore for HummockStorage {
                     sync_result_sender: tx,
                 })
                 .expect("should send success");
+            println!("wait sync result");
             Ok(rx.await.expect("should wait success")?)
         }
     }
@@ -667,6 +669,7 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
+        println!("send seal epoch");
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,
@@ -678,6 +681,7 @@ impl StateStore for HummockStorage {
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
             let (tx, rx) = oneshot::channel();
+            println!("send clear buffer");
             self.hummock_event_sender
                 .send(HummockEvent::Clear(tx))
                 .expect("should send success");

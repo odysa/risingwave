@@ -138,9 +138,7 @@ impl Replayable for HummockInterface {
     }
 
     async fn sync(&self, id: u64) {
-        println!("begin sync {}", id);
         let _: SyncResult = self.store.sync(id).await.unwrap();
-        println!("end sync");
     }
 
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {

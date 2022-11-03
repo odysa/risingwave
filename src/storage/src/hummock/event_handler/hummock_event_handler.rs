@@ -232,6 +232,7 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
+        println!("handle sync");
         if let Some(old_sync_result_sender) = self
             .pending_sync_requests
             .insert(new_sync_epoch, sync_result_sender)
@@ -247,7 +248,9 @@ impl HummockEventHandler {
                     );
                 });
         }
+        println!("begin write");
         let mut local_version_guard = self.local_version_manager.local_version.write();
+        println!("get write");
         let prev_max_sync_epoch =
             if let Some(epoch) = local_version_guard.get_prev_max_sync_epoch(new_sync_epoch) {
                 epoch
@@ -274,6 +277,7 @@ impl HummockEventHandler {
                 .compaction_group_index();
             let local_version_manager = self.local_version_manager.clone();
             let join_handle = tokio::spawn(async move {
+                println!("run sync");
                 let _ = local_version_manager
                     .run_sync_upload_task(
                         payload,
@@ -285,6 +289,7 @@ impl HummockEventHandler {
                     .inspect_err(|e| {
                         error!("sync upload task failed: {}, err: {:?}", new_sync_epoch, e);
                     });
+                println!("fin run sync");
             });
             self.upload_handle_manager
                 .add_epoch_handle(new_sync_epoch, once(join_handle));
@@ -375,7 +380,6 @@ impl HummockEventHandler {
         // TODO: remove it
         self.local_version_manager
             .try_update_pinned_version(version_payload);
-        println!("version update done");
     }
 
     fn handle_imm_to_uploader(&self, imm: ImmutableMemtable) {
@@ -386,14 +390,19 @@ impl HummockEventHandler {
 impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
         loop {
+            println!("wait for result");
             let select_result = match select(
                 self.upload_handle_manager.next_finished_epoch(),
                 self.hummock_event_rx.recv().boxed(),
             )
             .await
             {
-                Either::Left((epoch_result, _)) => Either::Left(epoch_result),
-                Either::Right((event, _)) => Either::Right(event),
+                Either::Left((epoch_result, _)) => {
+                    println!("rcv left result");
+                    Either::Left(epoch_result)},
+                Either::Right((event, _)) => {
+                    println!("rcv event {:?}", event);
+                    Either::Right(event)},
             };
             match select_result {
                 Either::Left(epoch_result) => {
@@ -434,18 +443,21 @@ impl HummockEventHandler {
                         epoch,
                         is_checkpoint,
                     } => {
+                        println!("handle seal");
                         self.local_version_manager
                             .local_version
                             .write()
                             .seal_epoch(epoch, is_checkpoint);
 
                         self.seal_epoch.store(epoch, Ordering::SeqCst);
+                        println!("seal done");
                     }
                 },
                 Either::Right(None) => {
                     break;
                 }
             };
+            println!("fin handle event");
         }
     }
 }

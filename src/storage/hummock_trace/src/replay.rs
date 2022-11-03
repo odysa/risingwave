@@ -88,7 +88,6 @@ impl<T: TraceReader> HummockReplay<T> {
         let mut record_worker_map: HashMap<RecordId, String> = HashMap::new();
 
         while let Ok(r) = self.reader.read() {
-            println!("read {:?}", r);
             let local_id = r.local_id();
             let record_id = r.record_id();
             let worker_id = self.get_worker_id(&local_id);
@@ -99,7 +98,6 @@ impl<T: TraceReader> HummockReplay<T> {
                     if let Some(worker_id) = record_worker_map.remove(&record_id) {
                         if let Some((_, resp_rx, _)) = workers.get(&worker_id) {
                             resp_rx.recv().expect("failed to wait task finish");
-                            println!("worker id done {:?}", worker_id);
                         } else {
                             println!("worker {} not found", worker_id);
                         }
@@ -153,7 +151,6 @@ async fn replay_worker(
         if let Ok(msg) = rx.recv() {
             match msg {
                 ReplayRequest::Task(record_group) => {
-                    println!("replay {:?}", record_group);
                     for r in record_group {
                         let Record(_, record_id, op) = r;
                         match op {
@@ -222,7 +219,6 @@ async fn replay_worker(
                         }
                     }
                     tx.send(()).expect("failed to done task");
-                    println!("replay done")
                 }
                 ReplayRequest::Fin => return,
             }

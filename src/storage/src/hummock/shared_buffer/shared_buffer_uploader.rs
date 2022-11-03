@@ -56,9 +56,8 @@ impl SharedBufferUploader {
             .sstable_id_manager
             .add_watermark_sst_id(Some(epoch))
             .await?;
-
-        let tables = compact(mem_compactor_ctx, payload, compaction_group_index).await?;
-
+        let tables = compact(mem_compactor_ctx, payload,
+        compaction_group_index).await?;
         let uploaded_sst_info = tables.into_iter().collect();
 
         // TODO: re-enable conflict detector after we have a better way to determine which actor

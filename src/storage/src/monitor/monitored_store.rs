@@ -31,7 +31,7 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
-pub struct MonitoredStateStore<S> {
+pub struct  MonitoredStateStore<S> {
     #[cfg(not(hm_trace))]
     inner: S,
 
