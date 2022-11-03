@@ -659,8 +659,7 @@ impl StateStore for HummockStorage {
                     sync_result_sender: tx,
                 })
                 .expect("should send success");
-            println!("wait sync result");
-            Ok(rx.await.expect("should wait success")?)
+            Ok(rx.await.unwrap()?)
         }
     }
 
