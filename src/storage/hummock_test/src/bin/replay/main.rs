@@ -100,7 +100,7 @@ async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
     let (hummock_meta_client, notification_client, notifier) = {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
-        let notifier = env.notification_manager_ref().clone();
+        let notifier = env.notification_manager_ref();
 
         let notification_client = match r.2 {
             Operation::MetaMessage(resp) => {

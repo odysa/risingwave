@@ -37,7 +37,7 @@ pub trait Replayable: Send + Sync {
         epoch: u64,
         table_id: u32,
         retention_seconds: Option<u32>,
-    ) -> Option<Vec<u8>>;
+    ) -> Result<Option<Vec<u8>>>;
     async fn ingest(
         &self,
         kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
@@ -53,12 +53,11 @@ pub trait Replayable: Send + Sync {
         table_id: u32,
         retention_seconds: Option<u32>,
     ) -> Result<Box<dyn ReplayIter>>;
-    async fn sync(&self, id: u64);
+    async fn sync(&self, id: u64) -> Result<usize>;
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
     async fn update_version(&self, version_id: u64);
     async fn wait_epoch(&self, epoch: ReadEpochStatus) -> Result<()>;
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
-    async fn wait_version_update(&self);
 }
 
 #[async_trait::async_trait]
@@ -85,15 +84,15 @@ impl<T: TraceReader> HummockReplay<T> {
             let record_id = r.record_id();
             let worker_id = self.get_worker_id(&local_id);
             match r.op() {
-                Operation::Result(_) => {}
+                Operation::Result(trace_result) => {
+                    if let Some(handler) = workers.get_mut(&worker_id) {
+                        handler.send_result(trace_result.to_owned());
+                    }
+                }
                 Operation::Finish => {
                     if let Some(worker_id) = record_worker_map.remove(&record_id) {
                         if let Some(handler) = workers.get_mut(&worker_id) {
-                            handler
-                                .resp_rx
-                                .recv()
-                                .await
-                                .expect("failed to wait task finish");
+                            handler.wait_resp().await;
                         } else {
                             println!("worker {} not found", worker_id);
                         }
@@ -114,10 +113,7 @@ impl<T: TraceReader> HummockReplay<T> {
                         }
                     });
 
-                    handler
-                        .req_tx
-                        .send(ReplayRequest::Task(vec![r]))
-                        .expect("should send task");
+                    handler.send_replay_req(ReplayRequest::Task(vec![r]));
 
                     record_worker_map.insert(record_id, worker_id);
 
@@ -130,12 +126,10 @@ impl<T: TraceReader> HummockReplay<T> {
         }
 
         for handler in workers.into_values() {
-            handler
-                .req_tx
-                .send(ReplayRequest::Fin)
-                .expect("failed to send fin msg");
+            handler.send_replay_req(ReplayRequest::Fin);
             handler.join().await;
         }
+
         Ok(())
     }
 
@@ -173,7 +167,7 @@ async fn replay_worker(
                                 table_id,
                                 retention_seconds,
                             ) => {
-                                let _value = replay
+                                let actual = replay
                                     .get(
                                         key,
                                         check_bloom_filter,
@@ -182,9 +176,17 @@ async fn replay_worker(
                                         retention_seconds,
                                     )
                                     .await;
+                                let res = res_rx.recv().await.expect("recv result failed");
+                                if let TraceOpResult::Get(expected) = res {
+                                    assert_eq!(actual.ok(), expected, "get result wrong");
+                                }
                             }
                             Operation::Ingest(kv_pairs, epoch, table_id) => {
-                                let _size = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
+                                let actual = replay.ingest(kv_pairs, epoch, table_id).await;
+                                let res = res_rx.recv().await.expect("recv result failed");
+                                if let TraceOpResult::Ingest(expected) = res {
+                                    assert_eq!(actual.ok(), expected, "ingest result wrong");
+                                }
                             }
                             Operation::Iter(
                                 prefix_hint,
@@ -208,7 +210,7 @@ async fn replay_worker(
                                 iters_map.insert(record_id, iter);
                             }
                             Operation::Sync(epoch_id) => {
-                                replay.sync(epoch_id).await;
+                                replay.sync(epoch_id).await.unwrap();
                             }
                             Operation::Seal(epoch_id, is_checkpoint) => {
                                 replay.seal_epoch(epoch_id, is_checkpoint).await;
@@ -248,6 +250,23 @@ struct WorkerHandler {
 impl WorkerHandler {
     async fn join(self) {
         self.join.await.expect("failed to stop worker");
+    }
+
+    fn send_replay_req(&self, req: ReplayRequest) {
+        self.req_tx
+            .send(req)
+            .expect("failed to send replay request");
+    }
+
+    fn send_result(&self, result: TraceOpResult) {
+        self.res_tx.send(result).expect("failed to send result");
+    }
+
+    async fn wait_resp(&mut self) {
+        self.resp_rx
+            .recv()
+            .await
+            .expect("failed to wait worker resp");
     }
 }
 
