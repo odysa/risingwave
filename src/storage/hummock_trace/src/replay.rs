@@ -16,12 +16,11 @@ use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use crossbeam::channel::{bounded, Receiver, Sender};
 #[cfg(test)]
 use mockall::automock;
-use parking_lot::RwLock;
 use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use crate::error::Result;
@@ -69,78 +68,88 @@ pub trait ReplayIter: Send + Sync {
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
-    tx: Sender<ReplayMessage>,
 }
 
 impl<T: TraceReader> HummockReplay<T> {
     pub fn new(reader: T) -> Self {
-        let (tx, _) = bounded::<ReplayMessage>(50);
-        Self { reader, tx }
+        Self { reader }
     }
 
-    pub async fn simple_run(&mut self, replay: Arc<Box<dyn Replayable>>) -> Result<()> {
-        let mut handle_map: HashMap<u64, JoinHandle<()>> = HashMap::new();
-        let mut total: u64 = 0;
-        let iter_map: HashMap<RecordId, Box<dyn ReplayIter>> = HashMap::new();
-        let iter_map = Arc::new(RwLock::new(iter_map));
-        loop {
-            match self.reader.read() {
-                Ok(r) => {
-                    match r.op() {
-                        Operation::Finish => {
-                            let record_id = r.record_id();
-                            if let Some(handle) = handle_map.remove(&record_id) {
-                                handle.await.expect("failed to wait a task");
-                            } else {
-                                println!("handle not found {}", record_id);
-                            }
-                        }
-                        Operation::Result(_) => {}
-                        _ => {
-                            let iter_map = iter_map.clone();
-                            let replay = replay.clone();
-                            let record_id = r.record_id();
-                            let handle = tokio::spawn(handle_record(r, replay, iter_map));
-                            handle_map.insert(record_id, handle);
-                            total += 1;
-                        }
-                    }
-                    if total % 10000 == 0 {
-                        println!("replayed {} ops", total);
-                    }
-                }
-                Err(e) => {
-                    println!("reader finished because {:?}", e);
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
+    pub async fn run(&mut self, replay: Arc<Box<dyn Replayable>>) -> Result<()> {
+        let mut workers: HashMap<String, WorkerHandler> = HashMap::new();
+        let mut total_ops: u64 = 0;
+        let mut record_worker_map: HashMap<RecordId, String> = HashMap::new();
 
-    pub async fn run(&mut self) -> Result<()> {
-        let total: u64 = 0;
         while let Ok(r) = self.reader.read() {
-            match r.local_id() {
-                TraceLocalId::Actor(_) => {}
-                TraceLocalId::Executor(_) => {}
-                TraceLocalId::None => {}
-            };
+            let local_id = r.local_id();
+            let record_id = r.record_id();
+            let worker_id = self.get_worker_id(&local_id);
+            match r.op() {
+                Operation::Result(_) => {}
+                Operation::Finish => {
+                    if let Some(worker_id) = record_worker_map.remove(&record_id) {
+                        if let Some((_, resp_rx, _)) = workers.get_mut(&worker_id) {
+                            resp_rx.recv().await.expect("failed to wait task finish");
+                        } else {
+                            println!("worker {} not found", worker_id);
+                        }
+                    }
+                }
+                _ => {
+                    let (req_tx, _, _) = workers.entry(worker_id.clone()).or_insert_with(|| {
+                        let (req_tx, req_rx) = unbounded_channel();
+                        let (resp_tx, resp_rx) = unbounded_channel();
+                        let replay = replay.clone();
+                        let handle = tokio::spawn(replay_worker(req_rx, resp_tx, replay));
+                        (req_tx, resp_rx, handle)
+                    });
+                    req_tx
+                        .send(ReplayRequest::Task(vec![r]))
+                        .expect("should send task");
 
-            if total % 10000 == 0 {
-                println!("replayed {} ops", total);
-            }
+                    record_worker_map.insert(record_id, worker_id);
+
+                    total_ops += 1;
+                    if total_ops % 10000 == 0 {
+                        println!("replayed {} ops", total_ops);
+                        break;
+                    }
+                }
+            };
+        }
+
+        for (req_tx, _, join) in workers.values_mut() {
+            req_tx
+                .send(ReplayRequest::Fin)
+                .expect("failed to send fin msg");
+            join.await.expect("failed to await a worker");
         }
         Ok(())
+    }
+
+    fn get_worker_id(&self, local_id: &TraceLocalId) -> String {
+        match local_id {
+            TraceLocalId::Actor(id) => {
+                format!("Actor {id}")
+            }
+            TraceLocalId::Executor(id) => {
+                format!("Executor {id}")
+            }
+            TraceLocalId::None => String::from("None"),
+        }
     }
 }
 
-async fn replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayable>>) {
+async fn replay_worker(
+    mut rx: UnboundedReceiver<ReplayRequest>,
+    tx: UnboundedSender<WorkerResponse>,
+    replay: Arc<Box<dyn Replayable>>,
+) {
     let mut iters_map = HashMap::new();
     loop {
-        if let Ok(msg) = rx.recv() {
+        if let Some(msg) = rx.recv().await {
             match msg {
-                ReplayMessage::Task(record_group) => {
+                ReplayRequest::Task(record_group) => {
                     for r in record_group {
                         let Record(_, record_id, op) = r;
                         match op {
@@ -151,7 +160,7 @@ async fn replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayab
                                 table_id,
                                 retention_seconds,
                             ) => {
-                                replay
+                                let _value = replay
                                     .get(
                                         key,
                                         check_bloom_filter,
@@ -162,7 +171,7 @@ async fn replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayab
                                     .await;
                             }
                             Operation::Ingest(kv_pairs, epoch, table_id) => {
-                                let _ = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
+                                let _size = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
                             }
                             Operation::Iter(
                                 prefix_hint,
@@ -204,82 +213,33 @@ async fn replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayab
                                     replay.notify_hummock(info, op).await.unwrap();
                                 }
                             }
-                            Operation::UpdateVersion(_) => todo!(),
                             Operation::Finish => unreachable!(),
-                            Operation::WaitEpoch(_) => {}
                             _ => {}
                         }
                     }
+                    tx.send(()).expect("failed to done task");
                 }
-                ReplayMessage::Fin => todo!(),
+                ReplayRequest::Fin => return,
             }
         }
     }
 }
 
-async fn handle_record(
-    r: Record,
-    replay: Arc<Box<dyn Replayable>>,
-    iter_map: Arc<RwLock<HashMap<RecordId, Box<dyn ReplayIter>>>>,
-) {
-    let Record(_, record_id, op) = r;
-    match op {
-        Operation::Get(key, check_bloom_filter, epoch, table_id, retention_seconds) => {
-            replay
-                .get(key, check_bloom_filter, epoch, table_id, retention_seconds)
-                .await;
-        }
-        Operation::Ingest(kv_pairs, epoch, table_id) => {
-            let _size = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
-        }
-        Operation::Iter(
-            prefix_hint,
-            left_bound,
-            right_bound,
-            epoch,
-            table_id,
-            retention_seconds,
-        ) => {
-            let _iter = replay
-                .iter(
-                    prefix_hint,
-                    left_bound,
-                    right_bound,
-                    epoch,
-                    table_id,
-                    retention_seconds,
-                )
-                .await
-                .unwrap();
-        }
-        Operation::Sync(epoch_id) => {
-            replay.sync(epoch_id).await;
-        }
-        Operation::Seal(epoch_id, is_checkpoint) => {
-            replay.seal_epoch(epoch_id, is_checkpoint).await;
-        }
-        Operation::IterNext(id, _) => {
-            let mut iter_map = iter_map.write();
-        }
-        Operation::MetaMessage(resp) => {
-            let op = resp.0.operation();
-            if let Some(info) = resp.0.info {
-                replay.notify_hummock(info, op).await.unwrap();
-            }
-        }
-        Operation::UpdateVersion(_) => todo!(),
-        Operation::Finish => unreachable!(),
-        Operation::WaitEpoch(_) => {}
-        _ => {}
-    }
-}
+type WorkerHandler = (
+    UnboundedSender<ReplayRequest>,
+    UnboundedReceiver<WorkerResponse>,
+    JoinHandle<()>,
+);
 
 type ReplayGroup = Vec<Record>;
 
-enum ReplayMessage {
+#[derive(Debug)]
+enum ReplayRequest {
     Task(ReplayGroup),
     Fin,
 }
+
+type WorkerResponse = ();
 
 // #[cfg(test)]
 // mod tests {

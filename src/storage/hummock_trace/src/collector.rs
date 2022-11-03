@@ -17,7 +17,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
 use std::path::Path;
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use flume::{unbounded, Receiver, Sender};
 use risingwave_common::hm_trace::TraceLocalId;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
@@ -59,8 +59,7 @@ pub fn init_collector() {
 
     let writer = BufWriter::new(f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
-
-    GLOBAL_COLLECTOR.run(Box::new(writer));
+    tokio::spawn(GLOBAL_COLLECTOR.run(Box::new(writer)));
 }
 
 struct GlobalCollector {
@@ -74,24 +73,23 @@ impl GlobalCollector {
         Self { tx, rx }
     }
 
-    fn run(&self, writer: Box<dyn TraceWriter + Send>) {
+    async fn run(&self, writer: Box<dyn TraceWriter + Send>) {
         let (writer_tx, writer_rx) = unbounded();
 
-        tokio::spawn(async move {
-            GlobalCollector::start_writer_worker(writer_rx, writer);
-        });
+        let writer_handle = tokio::spawn(GlobalCollector::start_writer_worker(writer_rx, writer));
 
         let rx = self.rx.clone();
 
-        tokio::spawn(async move {
-            GlobalCollector::start_collect_worker(rx, writer_tx);
-        });
+        let collect_handle = tokio::spawn(GlobalCollector::start_collect_worker(rx, writer_tx));
+
+        collect_handle.await.unwrap();
+        writer_handle.await.unwrap();
     }
 
-    fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter>) {
+    async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
         let mut size = 0;
         loop {
-            if let Ok(msg) = rx.recv() {
+            if let Ok(msg) = rx.recv_async().await {
                 match msg {
                     WriteMsg::Write(record) => {
                         size += writer.write(record).expect("failed to write the log file");
@@ -109,9 +107,9 @@ impl GlobalCollector {
         }
     }
 
-    fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
+    async fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
         loop {
-            if let Ok(message) = rx.recv() {
+            if let Ok(message) = rx.recv_async().await {
                 match message {
                     RecordMsg::Record(record) => {
                         writer_tx
@@ -151,7 +149,7 @@ impl Drop for GlobalCollector {
     }
 }
 
-/// TraceSpan traces hummock operations. It marks the beginning of an operation and
+/// `TraceSpan` traces hummock operations. It marks the beginning of an operation and
 /// the end when the span is dropped. So, please make sure the span live long enough.
 /// Underscore binding like `let _ = span` will drop the span immediately.
 #[must_use = "TraceSpan Lifetime is important"]
@@ -222,10 +220,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{trace, MockTraceWriter};
+    use crate::MockTraceWriter;
 
-    #[test]
-    fn test_global_new_span() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_global_new_span() {
         let rx = GLOBAL_COLLECTOR.rx();
 
         let op1 = Operation::Sync(0);
@@ -304,8 +302,9 @@ mod tests {
         let _collector = collector.clone();
 
         let runner_handle = tokio::spawn(async move {
-            _collector.clone().run(Box::new(mock_writer));
+            _collector.clone().run(Box::new(mock_writer)).await;
         });
+
         let mut handles = Vec::with_capacity(count as usize);
 
         for _ in 0..count {

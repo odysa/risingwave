@@ -519,20 +519,11 @@ impl StateStore for HummockStorage {
             let imm_size = imm.size();
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
-
             // insert imm to uploader
-            if let Err(e) = self
-                .core
+            self.core
                 .event_sender
                 .send(HummockEvent::ImmToUploader(imm))
-            {
-                println!(
-                    "send err {:?}, epoch {:?}, table id {:?}",
-                    e, epoch, table_id
-                );
-                panic!("failed to send imm");
-            }
-
+                .expect("failed to send imm");
             Ok(imm_size)
         }
     }

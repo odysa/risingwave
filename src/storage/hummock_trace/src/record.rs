@@ -112,7 +112,7 @@ pub enum Operation {
 
 type TraceResult<T> = Option<T>;
 
-#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum TraceOpResult {
     Get(TraceResult<Option<Vec<u8>>>),
     Ingest(TraceResult<usize>),
@@ -125,7 +125,7 @@ pub enum TraceOpResult {
 
 /// We must derive serialization trait for this
 /// so create a dummy enum here
-#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum ReadEpochStatus {
     Committed(u64),
     Current(u64),

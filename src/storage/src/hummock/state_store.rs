@@ -667,6 +667,7 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
+        println!("send seal epoch");
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,
