@@ -259,7 +259,7 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
         let count = 200;
 
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(rx.len(), count * 2);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_collector_run() {
         let count = 5000;
         let collector = Arc::new(GlobalCollector::new());

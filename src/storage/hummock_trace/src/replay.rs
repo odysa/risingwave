@@ -290,7 +290,7 @@ mod tests {
     use super::*;
     use crate::MockTraceReader;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_replay() {
         let mut mock_reader = MockTraceReader::new();
         let get_result = vec![54, 32, 198, 236, 24];

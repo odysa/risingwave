@@ -36,7 +36,7 @@ struct Args {
     path: String,
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let opts = Args::parse();
     let path = Path::new(&opts.path);

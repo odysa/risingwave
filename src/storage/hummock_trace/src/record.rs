@@ -195,7 +195,7 @@ mod tests {
     use crate::RecordIdGenerator;
 
     // test atomic id
-    #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn atomic_span_id() {
         // reset record id to be 0
         let gen = Arc::new(RecordIdGenerator::new());
