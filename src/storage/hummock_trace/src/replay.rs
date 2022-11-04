@@ -70,8 +70,8 @@ pub struct HummockReplay<R: TraceReader> {
     replay: Arc<Box<dyn Replayable>>,
 }
 
-impl<T: TraceReader> HummockReplay<T> {
-    pub fn new(reader: T, replay: Box<dyn Replayable>) -> Self {
+impl<R: TraceReader> HummockReplay<R> {
+    pub fn new(reader: R, replay: Box<dyn Replayable>) -> Self {
         Self {
             reader,
             replay: Arc::new(replay),
@@ -159,85 +159,82 @@ async fn replay_worker(
         if let Some(msg) = rx.recv().await {
             match msg {
                 ReplayRequest::Task(record_group) => {
-                    for r in record_group {
-                        let Record(_, record_id, op) = r;
-                        match op {
-                            Operation::Get(
-                                key,
-                                check_bloom_filter,
-                                epoch,
-                                table_id,
-                                retention_seconds,
-                            ) => {
-                                let actual = replay
-                                    .get(
-                                        key,
-                                        check_bloom_filter,
-                                        epoch,
-                                        table_id,
-                                        retention_seconds,
-                                    )
-                                    .await;
-                                let res = res_rx.recv().await.expect("recv result failed");
-                                if let TraceOpResult::Get(expected) = res {
-                                    assert_eq!(actual.ok(), expected, "get result wrong");
-                                }
-                            }
-                            Operation::Ingest(kv_pairs, epoch, table_id) => {
-                                let actual = replay.ingest(kv_pairs, epoch, table_id).await;
-                                let res = res_rx.recv().await.expect("recv result failed");
-                                if let TraceOpResult::Ingest(expected) = res {
-                                    assert_eq!(actual.ok(), expected, "ingest result wrong");
-                                }
-                            }
-                            Operation::Iter(
-                                prefix_hint,
-                                left_bound,
-                                right_bound,
-                                epoch,
-                                table_id,
-                                retention_seconds,
-                            ) => {
-                                let iter = replay
-                                    .iter(
-                                        prefix_hint,
-                                        left_bound,
-                                        right_bound,
-                                        epoch,
-                                        table_id,
-                                        retention_seconds,
-                                    )
-                                    .await
-                                    .expect("failed to create a iter");
-                                iters_map.insert(record_id, iter);
-                            }
-                            Operation::Sync(epoch_id) => {
-                                replay.sync(epoch_id).await.expect("failed to sync");
-                            }
-                            Operation::Seal(epoch_id, is_checkpoint) => {
-                                replay.seal_epoch(epoch_id, is_checkpoint).await;
-                            }
-                            Operation::IterNext(id, expected) => {
-                                let iter = iters_map.get_mut(&id).expect("iter not in worker");
-                                // if let Some(iter) = iter {
-                                let actual = iter.next().await;
-                                assert_eq!(actual, expected, "iter next value do not match");
-                                // }
-                            }
-                            Operation::MetaMessage(resp) => {
-                                let op = resp.0.operation();
-                                if let Some(info) = resp.0.info {
-                                    replay.notify_hummock(info, op).await.unwrap();
-                                }
-                            }
-                            _ => unreachable!(),
-                        }
+                    for record in record_group {
+                        handle_record(record, &replay, &mut res_rx, &mut iters_map).await;
                     }
                     tx.send(()).expect("failed to done task");
                 }
                 ReplayRequest::Fin => return,
             }
         }
+    }
+}
+
+async fn handle_record(
+    record: Record,
+    replay: &Arc<Box<dyn Replayable>>,
+    res_rx: &mut UnboundedReceiver<TraceOpResult>,
+    iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
+) {
+    let Record(_, record_id, op) = record;
+    match op {
+        Operation::Get(key, check_bloom_filter, epoch, table_id, retention_seconds) => {
+            let actual = replay
+                .get(key, check_bloom_filter, epoch, table_id, retention_seconds)
+                .await;
+            let res = res_rx.recv().await.expect("recv result failed");
+            if let TraceOpResult::Get(expected) = res {
+                assert_eq!(actual.ok(), expected, "get result wrong");
+            }
+        }
+        Operation::Ingest(kv_pairs, epoch, table_id) => {
+            let actual = replay.ingest(kv_pairs, epoch, table_id).await;
+            let res = res_rx.recv().await.expect("recv result failed");
+            if let TraceOpResult::Ingest(expected) = res {
+                assert_eq!(actual.ok(), expected, "ingest result wrong");
+            }
+        }
+        Operation::Iter(
+            prefix_hint,
+            left_bound,
+            right_bound,
+            epoch,
+            table_id,
+            retention_seconds,
+        ) => {
+            let iter = replay
+                .iter(
+                    prefix_hint,
+                    left_bound,
+                    right_bound,
+                    epoch,
+                    table_id,
+                    retention_seconds,
+                )
+                .await
+                .expect("failed to create a iter");
+            iters_map.insert(record_id, iter);
+        }
+        Operation::Sync(epoch_id) => {
+            replay.sync(epoch_id).await.expect("failed to sync");
+        }
+        Operation::Seal(epoch_id, is_checkpoint) => {
+            replay.seal_epoch(epoch_id, is_checkpoint).await;
+        }
+        Operation::IterNext(id, expected) => {
+            let iter = iters_map.get_mut(&id).expect("iter not in worker");
+            // if let Some(iter) = iter {
+            let actual = iter.next().await;
+            assert_eq!(actual, expected, "iter next value do not match");
+            // }
+        }
+        Operation::MetaMessage(resp) => {
+            let op = resp.0.operation();
+            if let Some(info) = resp.0.info {
+                replay.notify_hummock(info, op).await.unwrap();
+            }
+        }
+        _ => unreachable!(),
     }
 }
 

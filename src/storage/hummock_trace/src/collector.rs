@@ -32,11 +32,9 @@ lazy_static! {
 
 const LOG_PATH: &str = "HM_TRACE_PATH";
 const DEFAULT_PATH: &str = ".trace/hummock.ht";
+const WRITER_BUFFER_SIZE: usize = 1024;
 
-// struct CollectorConfig {
-//     write_buffer_size: i32,
-// }
-
+/// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
     let path = match env::var(LOG_PATH) {
         Ok(p) => p,
@@ -62,6 +60,8 @@ pub fn init_collector() {
     tokio::spawn(GLOBAL_COLLECTOR.run(Box::new(writer)));
 }
 
+/// `GlobalCollector` collects traced hummock operations.
+/// It starts a collector thread and writer thread.
 struct GlobalCollector {
     tx: Sender<RecordMsg>,
     rx: Receiver<RecordMsg>,
@@ -82,8 +82,10 @@ impl GlobalCollector {
 
         let collect_handle = tokio::spawn(GlobalCollector::start_collect_worker(rx, writer_tx));
 
-        collect_handle.await.unwrap();
-        writer_handle.await.unwrap();
+        collect_handle
+            .await
+            .expect("failed to stop collector thread");
+        writer_handle.await.expect("failed to stop writer thread");
     }
 
     async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
@@ -94,7 +96,7 @@ impl GlobalCollector {
                     WriteMsg::Write(record) => {
                         size += writer.write(record).expect("failed to write the log file");
                         // default to use a BufWriter, must flush memory
-                        if size > 10 {
+                        if size > WRITER_BUFFER_SIZE {
                             writer.flush().expect("failed to sync file");
                             size = 0;
                         }
@@ -183,7 +185,8 @@ impl TraceSpan {
         self.id
     }
 
-    pub fn new_global_op(op: Operation, local_id: TraceLocalId) -> Self {
+    /// Create a span and send operation to the `GLOBAL_COLLECTOR`
+    pub fn new_to_global(op: Operation, local_id: TraceLocalId) -> Self {
         let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
         span.send(op, local_id);
         span
@@ -232,8 +235,8 @@ mod tests {
         let record1 = Record::new_local_none(0, op1.clone());
         let record2 = Record::new_local_none(1, op2.clone());
 
-        let _span1 = TraceSpan::new_global_op(op1, TraceLocalId::None);
-        let _span2 = TraceSpan::new_global_op(op2, TraceLocalId::None);
+        let _span1 = TraceSpan::new_to_global(op1, TraceLocalId::None);
+        let _span2 = TraceSpan::new_to_global(op2, TraceLocalId::None);
 
         let msg1 = rx.recv().unwrap();
         let msg2 = rx.recv().unwrap();

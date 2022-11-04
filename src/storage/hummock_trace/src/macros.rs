@@ -15,7 +15,7 @@
 #[macro_export]
 macro_rules! trace {
     (GET, $key:ident, $bloom_filter:ident, $opt:ident) => {
-        $crate::collector::TraceSpan::new_global_op(
+        $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Get(
                 $key.to_vec(),
                 $bloom_filter,
@@ -27,7 +27,7 @@ macro_rules! trace {
         );
     };
     (INGEST, $kvs:ident, $opt:ident) => {
-        $crate::collector::TraceSpan::new_global_op(
+        $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Ingest(
                 $kvs.iter()
                     .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|v| v.to_vec())))
@@ -40,7 +40,7 @@ macro_rules! trace {
     };
     (ITER, $prefix:ident, $range:ident, $opt:ident) => {
         // do not assign iter span to a variable
-        $crate::collector::TraceSpan::new_global_op(
+        $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Iter(
                 $prefix.clone(),
                 $range.0.clone(),
@@ -53,7 +53,7 @@ macro_rules! trace {
         );
     };
     (ITER_NEXT, $id:expr, $pair:ident) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::IterNext(
                 $id,
                 $pair.clone().map(|(k, v)| (k.to_vec(), v.to_vec())),
@@ -62,31 +62,31 @@ macro_rules! trace {
         );
     };
     (SYNC, $epoch:ident) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Sync($epoch),
             risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
     (SEAL, $epoch:ident, $check_point:ident) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Seal($epoch, $check_point),
             risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
     (VERSION) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::UpdateVersion(),
             risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
     (METAMSG, $resp:ident) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::MetaMessage($crate::record::TraceSubResp($resp.clone())),
             risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
     (WAITEPOCH, $epoch:ident) => {
-        let _span = $crate::collector::TraceSpan::new_global_op(
+        let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::WaitEpoch($crate::record::ReadEpochStatus::from(
                 $epoch.clone(),
             )),
