@@ -128,10 +128,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         &self,
         epoch: risingwave_hummock_sdk::HummockReadEpoch,
     ) -> Self::WaitEpochFuture<'_> {
-        async move {
-            trace!(WAITEPOCH, epoch);
-            self.inner.try_wait_epoch(epoch).await
-        }
+        async move { self.inner.try_wait_epoch(epoch).await }
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {

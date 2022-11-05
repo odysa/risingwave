@@ -85,14 +85,6 @@ macro_rules! trace {
             risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
-    (WAITEPOCH, $epoch:ident) => {
-        let _span = $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::WaitEpoch($crate::record::ReadEpochStatus::from(
-                $epoch.clone(),
-            )),
-            risingwave_common::hm_trace::TraceLocalId::None,
-        );
-    };
 }
 
 #[macro_export]

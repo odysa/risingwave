@@ -25,7 +25,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{Operation, ReadEpochStatus, Record, RecordId, TraceOpResult};
+use crate::{Operation, Record, RecordId, TraceOpResult};
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -56,7 +56,6 @@ pub trait Replayable: Send + Sync {
     async fn sync(&self, id: u64) -> Result<usize>;
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
     async fn update_version(&self, version_id: u64);
-    async fn wait_epoch(&self, epoch: ReadEpochStatus) -> Result<()>;
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
 }
 

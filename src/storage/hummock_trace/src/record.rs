@@ -16,7 +16,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bincode::{BorrowDecode, Decode, Encode};
 use risingwave_common::hm_trace::TraceLocalId;
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
 
 pub type RecordId = u64;
@@ -62,23 +61,26 @@ impl Record {
     }
 }
 
+type TraceKey = Vec<u8>;
+type TraceValue = Vec<u8>;
+
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
     /// Get operation of Hummock.
     /// (key, check_bloom_filter, epoch, table_id, retention_seconds)
-    Get(Vec<u8>, bool, u64, u32, Option<u32>),
+    Get(TraceKey, bool, u64, u32, Option<u32>),
 
     /// Ingest operation of Hummock.
     /// (kv_pairs, epoch, table_id)
-    Ingest(Vec<(Vec<u8>, Option<Vec<u8>>)>, u64, u32),
+    Ingest(Vec<(TraceKey, Option<TraceValue>)>, u64, u32),
 
     /// Iter operation of Hummock
     /// (prefix_hint, left_bound, right_bound, epoch, table_id, retention_seconds)
     Iter(
-        Option<Vec<u8>>,
-        Bound<Vec<u8>>,
-        Bound<Vec<u8>>,
+        Option<TraceKey>,
+        Bound<TraceKey>,
+        Bound<TraceKey>,
         u64,
         u32,
         Option<u32>,
@@ -86,7 +88,7 @@ pub enum Operation {
 
     /// Iter.next operation
     /// (record_id, kv_pair)
-    IterNext(RecordId, Option<(Vec<u8>, Vec<u8>)>),
+    IterNext(RecordId, Option<(TraceKey, TraceValue)>),
 
     /// Sync operation
     /// (epoch)
@@ -99,8 +101,6 @@ pub enum Operation {
     /// Update local_version
     UpdateVersion(u64),
 
-    WaitEpoch(ReadEpochStatus),
-
     /// The end of an operation
     Finish,
 
@@ -110,46 +110,18 @@ pub enum Operation {
     Result(TraceOpResult),
 }
 
+/// TraceResult discards Error and only marks whether succeeded or not.
+/// Use Option rather than Result because it's overhead to serialize Error.
 type TraceResult<T> = Option<T>;
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum TraceOpResult {
-    Get(TraceResult<Option<Vec<u8>>>),
+    Get(TraceResult<Option<TraceValue>>),
     Ingest(TraceResult<usize>),
     Iter(TraceResult<()>),
     Sync(TraceResult<()>),
     Seal(TraceResult<()>),
-    WaitEpoch(TraceResult<()>),
     NotifyHummock(TraceResult<()>),
-}
-
-/// We must derive serialization trait for this
-/// so create a dummy enum here
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
-pub enum ReadEpochStatus {
-    Committed(u64),
-    Current(u64),
-    NoWait(u64),
-}
-
-impl From<HummockReadEpoch> for ReadEpochStatus {
-    fn from(epoch: HummockReadEpoch) -> Self {
-        match epoch {
-            HummockReadEpoch::Committed(id) => ReadEpochStatus::Committed(id),
-            HummockReadEpoch::Current(id) => ReadEpochStatus::Current(id),
-            HummockReadEpoch::NoWait(id) => ReadEpochStatus::NoWait(id),
-        }
-    }
-}
-
-impl Into<HummockReadEpoch> for ReadEpochStatus {
-    fn into(self) -> HummockReadEpoch {
-        match self {
-            ReadEpochStatus::Committed(id) => HummockReadEpoch::Committed(id),
-            ReadEpochStatus::Current(id) => HummockReadEpoch::Current(id),
-            ReadEpochStatus::NoWait(id) => HummockReadEpoch::NoWait(id),
-        }
-    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
