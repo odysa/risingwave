@@ -7720,7 +7720,6 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "getrandom 0.2.7",
  "hashbrown",
  "hdrhistogram",
  "hyper",
