@@ -131,7 +131,7 @@ impl Replayable for HummockInterface {
                 },
             )
             .await
-            .map_err(|_| TraceError::IterFailed)?;
+            .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
 
         let iter = HummockReplayIter::new(iter);
         Ok(Box::new(iter))
@@ -152,9 +152,13 @@ impl Replayable for HummockInterface {
 
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
         let prev_version_id = match &info {
-            Info::HummockVersionDeltas(_) => {
+            Info::HummockVersionDeltas(deltas) => {
                 // don't replay version deltas update for now
-                return Ok(0);
+                if let Some(v) = deltas.version_deltas.last() {
+                    Some(v.prev_id)
+                } else {
+                    None
+                }
             }
             _ => None,
         };

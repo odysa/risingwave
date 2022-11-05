@@ -64,7 +64,7 @@ async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
         share_buffers_sync_parallelism: 2,
         share_buffer_compaction_worker_threads_number: 1,
         shared_buffer_capacity_mb: 64,
-        data_directory: "hummock_002".to_string(),
+        data_directory: "hummock_003".to_string(),
         write_conflict_detection_enabled: true,
         block_cache_capacity_mb: 64,
         meta_cache_capacity_mb: 64,

@@ -120,7 +120,7 @@ pub enum OperationResult {
     Ingest(TraceResult<usize>),
     Iter(TraceResult<()>),
     IterNext(TraceResult<(TraceKey, TraceValue)>),
-    Sync(TraceResult<()>),
+    Sync(TraceResult<usize>),
     Seal(TraceResult<()>),
     NotifyHummock(TraceResult<()>),
 }

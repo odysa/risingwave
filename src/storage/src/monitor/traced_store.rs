@@ -109,11 +109,17 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         key_range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
         read_options: crate::store::ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let span = trace!(ITER, prefix_hint, key_range, read_options);
-        self.traced_iter(
-            self.inner.iter(prefix_hint, key_range, read_options),
-            span.id(),
-        )
+        async move {
+            let span = trace!(ITER, prefix_hint, key_range, read_options);
+            let iter = self
+                .traced_iter(
+                    self.inner.iter(prefix_hint, key_range, read_options),
+                    span.id(),
+                )
+                .await;
+            trace_result!(ITER, span, iter);
+            iter
+        }
     }
 
     fn backward_iter(
@@ -133,8 +139,10 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            trace!(SYNC, epoch);
-            self.inner.sync(epoch).await
+            let span = trace!(SYNC, epoch);
+            let sync_result = self.inner.sync(epoch).await;
+            trace_result!(SYNC, span, sync_result);
+            sync_result
         }
     }
 

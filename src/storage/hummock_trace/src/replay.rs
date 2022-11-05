@@ -85,6 +85,7 @@ impl<R: TraceReader> HummockReplay<R> {
             let local_id = r.local_id();
             let record_id = r.record_id();
             let worker_id = self.get_worker_id(&local_id);
+            println!("read {:?}", r);
             match r.op() {
                 Operation::Result(trace_result) => {
                     if let Some(handler) = workers.get_mut(&worker_id) {
@@ -210,7 +211,7 @@ async fn handle_record(
                     retention_seconds,
                 )
                 .await
-                .expect("failed to create a iter");
+                .expect("iter failed");
             iters_map.insert(record_id, iter);
         }
         Operation::Sync(epoch_id) => {

@@ -584,7 +584,7 @@ template:
     unsafe-disable-recovery: false
 
     # Interval of GC stale metadata and SST
-    vacuum-interval-sec: 30
+    vacuum-interval-sec: 6048000
 
     # Interval of periodical compaction
     periodic-compaction-interval-sec: 60

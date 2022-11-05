@@ -59,7 +59,7 @@ macro_rules! trace {
         );
     };
     (SYNC, $epoch:ident) => {
-        let _span = $crate::collector::TraceSpan::new_to_global(
+        $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Sync($epoch),
             risingwave_common::hm_trace::TraceLocalId::None,
         );
@@ -105,10 +105,24 @@ macro_rules! trace_result {
             risingwave_common::hm_trace::task_local_get(),
         );
     };
+    (ITER, $span:ident, $result:ident) => {
+        let res = $result.as_ref().map(|_| ()).ok();
+        $span.send(
+            $crate::record::Operation::Result(OperationResult::Iter(res)),
+            risingwave_common::hm_trace::task_local_get(),
+        );
+    };
     (ITER_NEXT, $span:ident, $pair:ident) => {
         let res = $pair.clone().map(|(k, v)| (k.to_vec(), v.to_vec()));
         $span.send(
             $crate::record::Operation::Result(OperationResult::IterNext(res)),
+            risingwave_common::hm_trace::task_local_get(),
+        );
+    };
+    (SYNC, $span:ident, $result:ident) => {
+        let res = $result.as_ref().map(|res| res.sync_size.clone()).ok();
+        $span.send(
+            $crate::record::Operation::Result(OperationResult::Sync(res)),
             risingwave_common::hm_trace::task_local_get(),
         );
     };
