@@ -25,7 +25,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{Operation, Record, RecordId, TraceOpResult};
+use crate::{Operation, OperationResult, Record, RecordId};
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -55,7 +55,6 @@ pub trait Replayable: Send + Sync {
     ) -> Result<Box<dyn ReplayIter>>;
     async fn sync(&self, id: u64) -> Result<usize>;
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn update_version(&self, version_id: u64);
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
 }
 
@@ -149,7 +148,7 @@ impl<R: TraceReader> HummockReplay<R> {
 
 async fn replay_worker(
     mut rx: UnboundedReceiver<ReplayRequest>,
-    mut res_rx: UnboundedReceiver<TraceOpResult>,
+    mut res_rx: UnboundedReceiver<OperationResult>,
     tx: UnboundedSender<WorkerResponse>,
     replay: Arc<Box<dyn Replayable>>,
 ) {
@@ -172,7 +171,7 @@ async fn replay_worker(
 async fn handle_record(
     record: Record,
     replay: &Arc<Box<dyn Replayable>>,
-    res_rx: &mut UnboundedReceiver<TraceOpResult>,
+    res_rx: &mut UnboundedReceiver<OperationResult>,
     iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
 ) {
     let Record(_, record_id, op) = record;
@@ -182,14 +181,14 @@ async fn handle_record(
                 .get(key, check_bloom_filter, epoch, table_id, retention_seconds)
                 .await;
             let res = res_rx.recv().await.expect("recv result failed");
-            if let TraceOpResult::Get(expected) = res {
+            if let OperationResult::Get(expected) = res {
                 assert_eq!(actual.ok(), expected, "get result wrong");
             }
         }
         Operation::Ingest(kv_pairs, epoch, table_id) => {
             let actual = replay.ingest(kv_pairs, epoch, table_id).await;
             let res = res_rx.recv().await.expect("recv result failed");
-            if let TraceOpResult::Ingest(expected) = res {
+            if let OperationResult::Ingest(expected) = res {
                 assert_eq!(actual.ok(), expected, "ingest result wrong");
             }
         }
@@ -220,12 +219,13 @@ async fn handle_record(
         Operation::Seal(epoch_id, is_checkpoint) => {
             replay.seal_epoch(epoch_id, is_checkpoint).await;
         }
-        Operation::IterNext(id, expected) => {
+        Operation::IterNext(id) => {
             let iter = iters_map.get_mut(&id).expect("iter not in worker");
-            // if let Some(iter) = iter {
             let actual = iter.next().await;
-            assert_eq!(actual, expected, "iter next value do not match");
-            // }
+            let res = res_rx.recv().await.expect("recv result failed");
+            if let OperationResult::IterNext(expected) = res {
+                assert_eq!(actual, expected, "iter_next result wrong");
+            }
         }
         Operation::MetaMessage(resp) => {
             let op = resp.0.operation();
@@ -239,7 +239,7 @@ async fn handle_record(
 
 struct WorkerHandler {
     req_tx: UnboundedSender<ReplayRequest>,
-    res_tx: UnboundedSender<TraceOpResult>,
+    res_tx: UnboundedSender<OperationResult>,
     resp_rx: UnboundedReceiver<WorkerResponse>,
     join: JoinHandle<()>,
 }
@@ -255,7 +255,7 @@ impl WorkerHandler {
             .expect("failed to send replay request");
     }
 
-    fn send_result(&self, result: TraceOpResult) {
+    fn send_result(&self, result: OperationResult) {
         self.res_tx.send(result).expect("failed to send result");
     }
 
@@ -310,15 +310,15 @@ mod tests {
             )),
             Ok(Record::new_local_none(
                 0,
-                Operation::Result(TraceOpResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
             )),
             Ok(Record::new_local_none(
                 0,
-                Operation::Result(TraceOpResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
             )),
             Ok(Record::new_local_none(
                 0,
-                Operation::Result(TraceOpResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
             )),
             Ok(Record::new_local_none(2, Operation::Finish)),
             Ok(Record::new_local_none(1, Operation::Finish)),
@@ -329,7 +329,7 @@ mod tests {
             )),
             Ok(Record::new_local_none(
                 0,
-                Operation::Result(TraceOpResult::Ingest(Some(ingest_result))),
+                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
             )),
             Ok(Record::new_local_none(4, Operation::Sync(sync_id))),
             Ok(Record::new_local_none(

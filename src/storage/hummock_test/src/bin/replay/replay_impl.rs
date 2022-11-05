@@ -16,7 +16,7 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_trace::{ReadEpochStatus, ReplayIter, Replayable, Result, TraceError};
+use risingwave_hummock_trace::{ReplayIter, Replayable, Result, TraceError};
 use risingwave_meta::manager::NotificationManagerRef;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
@@ -164,15 +164,5 @@ impl Replayable for HummockInterface {
             let _ = self.store.wait_version_update(prev_version_id).await;
         }
         Ok(version)
-    }
-
-    async fn wait_epoch(&self, epoch: ReadEpochStatus) -> Result<()> {
-        self.store.try_wait_epoch(epoch.into()).await.unwrap();
-        Ok(())
-    }
-
-    async fn update_version(&self, _: u64) {
-        // intentionally left blank because hummock currently does not expose update_version
-        // interface
     }
 }

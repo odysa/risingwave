@@ -88,7 +88,7 @@ pub enum Operation {
 
     /// Iter.next operation
     /// (record_id, kv_pair)
-    IterNext(RecordId, Option<(TraceKey, TraceValue)>),
+    IterNext(RecordId),
 
     /// Sync operation
     /// (epoch)
@@ -107,7 +107,7 @@ pub enum Operation {
     /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
     MetaMessage(TraceSubResp),
 
-    Result(TraceOpResult),
+    Result(OperationResult),
 }
 
 /// TraceResult discards Error and only marks whether succeeded or not.
@@ -115,10 +115,11 @@ pub enum Operation {
 type TraceResult<T> = Option<T>;
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
-pub enum TraceOpResult {
+pub enum OperationResult {
     Get(TraceResult<Option<TraceValue>>),
     Ingest(TraceResult<usize>),
     Iter(TraceResult<()>),
+    IterNext(TraceResult<(TraceKey, TraceValue)>),
     Sync(TraceResult<()>),
     Seal(TraceResult<()>),
     NotifyHummock(TraceResult<()>),

@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_trace::{
-    init_collector, trace, trace_result, RecordId, TraceOpResult, TraceSpan,
+    init_collector, trace, trace_result, OperationResult, RecordId, TraceSpan,
 };
 
 use crate::error::StorageResult;
@@ -174,8 +174,9 @@ where
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
+            let span = trace!(ITER_NEXT, self.record_id);
             let kv_pair = self.inner.next().await.expect("failed to call iter next");
-            trace!(ITER_NEXT, self.record_id, kv_pair);
+            trace_result!(ITER_NEXT, span, kv_pair);
             Ok(kv_pair)
         }
     }

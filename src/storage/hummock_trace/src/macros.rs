@@ -52,12 +52,9 @@ macro_rules! trace {
             risingwave_common::hm_trace::task_local_get(),
         );
     };
-    (ITER_NEXT, $id:expr, $pair:ident) => {
-        let _span = $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::IterNext(
-                $id,
-                $pair.clone().map(|(k, v)| (k.to_vec(), v.to_vec())),
-            ),
+    (ITER_NEXT, $id:expr) => {
+        $crate::collector::TraceSpan::new_to_global(
+            $crate::record::Operation::IterNext($id),
             risingwave_common::hm_trace::task_local_get(),
         );
     };
@@ -97,14 +94,21 @@ macro_rules! trace_result {
             .ok()
             .map(|b| b.map(|c| c.to_vec()));
         $span.send(
-            $crate::record::Operation::Result(TraceOpResult::Get(res)),
+            $crate::record::Operation::Result(OperationResult::Get(res)),
             risingwave_common::hm_trace::task_local_get(),
         );
     };
     (INGEST, $span:ident, $result:ident) => {
         let res = $result.as_ref().map(Clone::clone).ok();
         $span.send(
-            $crate::record::Operation::Result(TraceOpResult::Ingest(res)),
+            $crate::record::Operation::Result(OperationResult::Ingest(res)),
+            risingwave_common::hm_trace::task_local_get(),
+        );
+    };
+    (ITER_NEXT, $span:ident, $pair:ident) => {
+        let res = $pair.clone().map(|(k, v)| (k.to_vec(), v.to_vec()));
+        $span.send(
+            $crate::record::Operation::Result(OperationResult::IterNext(res)),
             risingwave_common::hm_trace::task_local_get(),
         );
     };
