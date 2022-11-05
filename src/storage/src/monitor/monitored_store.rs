@@ -22,6 +22,8 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
 use super::StateStoreMetrics;
+#[cfg(hm_trace)]
+use super::{TracedStateStore, TracedStateStoreIter};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
@@ -45,7 +47,6 @@ impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         #[cfg(hm_trace)]
         let inner = TracedStateStore::new(inner);
-
         Self { inner, stats }
     }
 }
