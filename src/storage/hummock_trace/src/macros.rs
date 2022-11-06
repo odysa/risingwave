@@ -123,7 +123,7 @@ macro_rules! trace_result {
         let res = $result.as_ref().map(|res| res.sync_size.clone()).ok();
         $span.send(
             $crate::record::Operation::Result(OperationResult::Sync(res)),
-            risingwave_common::hm_trace::task_local_get(),
+            risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
 }

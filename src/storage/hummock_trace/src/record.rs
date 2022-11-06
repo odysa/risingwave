@@ -37,7 +37,11 @@ impl RecordIdGenerator {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
-pub struct Record(pub TraceLocalId, pub RecordId, pub Operation);
+pub struct Record(
+    #[bincode(with_serde)] pub TraceLocalId,
+    pub RecordId,
+    pub Operation,
+);
 
 impl Record {
     pub(crate) fn new(local_id: TraceLocalId, record_id: RecordId, op: Operation) -> Self {
@@ -143,6 +147,8 @@ impl Decode for TraceSubResp {
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         let s: String = Decode::decode(decoder)?;
+        // Bincode cannot decode serialized data with meta info
+        // And we cannot derive `Bincode::Decode` for `SubscribeResponse`
         let resp: SubscribeResponse = ron::from_str(&s).unwrap();
         Ok(Self(resp))
     }

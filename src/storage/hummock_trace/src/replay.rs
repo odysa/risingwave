@@ -77,15 +77,15 @@ impl<R: TraceReader> HummockReplay<R> {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        let mut workers: HashMap<String, WorkerHandler> = HashMap::new();
+        let mut workers: HashMap<WorkerId, WorkerHandler> = HashMap::new();
         let mut total_ops: u64 = 0;
-        let mut record_worker_map: HashMap<RecordId, String> = HashMap::new();
-
+        let mut worker_record_map = HashMap::new();
         while let Ok(r) = self.reader.read() {
             let local_id = r.local_id();
             let record_id = r.record_id();
-            let worker_id = self.get_worker_id(&local_id);
-            println!("read {:?}", r);
+
+            let worker_id = self.allocate_worker_id(&local_id, record_id);
+
             match r.op() {
                 Operation::Result(trace_result) => {
                     if let Some(handler) = workers.get_mut(&worker_id) {
@@ -93,8 +93,8 @@ impl<R: TraceReader> HummockReplay<R> {
                     }
                 }
                 Operation::Finish => {
-                    if let Some(worker_id) = record_worker_map.remove(&record_id) {
-                        if let Some(handler) = workers.get_mut(&worker_id) {
+                    if let Some(id) = worker_record_map.remove(&record_id) {
+                        if let Some(handler) = workers.get_mut(&id) {
                             handler.wait_resp().await;
                         }
                     }
@@ -115,9 +115,7 @@ impl<R: TraceReader> HummockReplay<R> {
                     });
 
                     handler.send_replay_req(ReplayRequest::Task(vec![r]));
-
-                    record_worker_map.insert(record_id, worker_id);
-
+                    worker_record_map.insert(record_id, worker_id);
                     total_ops += 1;
                     if total_ops % 10000 == 0 {
                         println!("replayed {} ops", total_ops);
@@ -130,21 +128,24 @@ impl<R: TraceReader> HummockReplay<R> {
             handler.send_replay_req(ReplayRequest::Fin);
             handler.join().await;
         }
-
+        println!("replay finished, totally {} operations", total_ops);
         Ok(())
     }
 
-    fn get_worker_id(&self, local_id: &TraceLocalId) -> String {
+    fn allocate_worker_id(&self, local_id: &TraceLocalId, record_id: RecordId) -> WorkerId {
         match local_id {
-            TraceLocalId::Actor(id) => {
-                format!("Actor {id}")
-            }
-            TraceLocalId::Executor(id) => {
-                format!("Executor {id}")
-            }
-            TraceLocalId::None => String::from("None"),
+            TraceLocalId::Actor(id) => WorkerId::Actor(*id),
+            TraceLocalId::Executor(id) => WorkerId::Executor(*id),
+            TraceLocalId::None => WorkerId::None(record_id),
         }
     }
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Clone)]
+enum WorkerId {
+    Actor(u32),
+    Executor(u32),
+    None(u64),
 }
 
 async fn replay_worker(
@@ -210,12 +211,21 @@ async fn handle_record(
                     table_id,
                     retention_seconds,
                 )
-                .await
-                .expect("iter failed");
-            iters_map.insert(record_id, iter);
+                .await;
+            let res = res_rx.recv().await.expect("recv result failed");
+            if let OperationResult::Iter(expected) = res {
+                let actual = iter.as_ref().map(|_| ()).ok();
+                assert_eq!(actual, expected);
+                iters_map.insert(record_id, iter.unwrap());
+            }
         }
         Operation::Sync(epoch_id) => {
-            replay.sync(epoch_id).await.expect("failed to sync");
+            let sync_result = replay.sync(epoch_id).await;
+            let res = res_rx.recv().await.expect("recv result failed");
+            if let OperationResult::Sync(expected) = res {
+                let actual = sync_result.ok();
+                assert_eq!(actual, expected);
+            }
         }
         Operation::Seal(epoch_id, is_checkpoint) => {
             replay.seal_epoch(epoch_id, is_checkpoint).await;

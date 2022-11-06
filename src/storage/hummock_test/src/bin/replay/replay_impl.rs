@@ -153,12 +153,12 @@ impl Replayable for HummockInterface {
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
         let prev_version_id = match &info {
             Info::HummockVersionDeltas(deltas) => {
-                // don't replay version deltas update for now
-                if let Some(v) = deltas.version_deltas.last() {
-                    Some(v.prev_id)
-                } else {
-                    None
-                }
+                // if let Some(v) = deltas.version_deltas.last() {
+                //     Some(v.prev_id)
+                // } else {
+                //     None
+                // }
+                return Ok(0);
             }
             _ => None,
         };
