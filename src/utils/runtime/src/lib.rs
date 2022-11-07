@@ -22,7 +22,6 @@ use std::time::Duration;
 use futures::Future;
 use tracing::Level;
 use tracing_subscriber::filter;
-use tracing_subscriber::fmt::time;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 

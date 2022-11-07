@@ -427,7 +427,6 @@ impl HummockStorageCore {
             .iter_merge_sstable_counts
             .with_label_values(&["committed-non-overlapping-iter"])
             .observe(non_overlapping_iters.len() as f64);
-
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
             once(HummockIteratorUnion::First(staging_iter))
@@ -442,7 +441,6 @@ impl HummockStorageCore {
                         .map(HummockIteratorUnion::Third),
                 ),
         );
-
         // the epoch_range left bound for iterator read
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
         let mut user_iter =

@@ -225,9 +225,7 @@ impl SstableMeta {
         cursor -= 8;
         let checksum = (&buf[cursor..cursor + 8]).get_u64_le();
         let buf = &mut &buf[..cursor];
-        println!("check sum");
         xxhash64_verify(buf, checksum)?;
-        println!("check valid sum");
 
         let block_meta_count = buf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_meta_count);

@@ -50,50 +50,21 @@ impl<S> MonitoredStateStore<S> {
         Self { inner, stats }
     }
 }
+#[cfg(not(hm_trace))]
+type MonitoredIterInnerType<I> = I;
+#[cfg(hm_trace)]
+type MonitoredIterInnerType<I> = TracedStateStoreIter<I>;
 
 impl<S> MonitoredStateStore<S>
 where
     S: StateStore,
 {
-    #[cfg(not(hm_trace))]
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
     ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
     where
-        I: Future<Output = StorageResult<S::Iter>>,
-    {
-        // start time takes iterator build time into account
-        let start_time = minstant::Instant::now();
-
-        // wait for iterator creation (e.g. seek)
-        let iter = iter
-            .verbose_stack_trace("store_create_iter")
-            .await
-            .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
-
-        // statistics of iter in process count to estimate the read ops in the same time
-        self.stats.iter_in_process_counts.inc();
-
-        // create a monitored iterator to collect metrics
-        let monitored = MonitoredStateStoreIter {
-            inner: iter,
-            total_items: 0,
-            total_size: 0,
-            start_time,
-            scan_time: minstant::Instant::now(),
-            stats: self.stats.clone(),
-        };
-        Ok(monitored)
-    }
-
-    #[cfg(hm_trace)]
-    async fn monitored_iter<'a, I>(
-        &self,
-        iter: I,
-    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
-    where
-        I: Future<Output = StorageResult<TracedStateStoreIter<S::Iter>>>,
+        I: Future<Output = StorageResult<MonitoredIterInnerType<S::Iter>>>,
     {
         // start time takes iterator build time into account
         let start_time = minstant::Instant::now();

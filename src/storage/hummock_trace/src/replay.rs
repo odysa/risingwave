@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use mockall::automock;
+use risingwave_common::catalog::TableId;
 use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -176,6 +177,7 @@ async fn handle_record(
     res_rx: &mut UnboundedReceiver<OperationResult>,
     iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
 ) {
+    // println!("handle {:?}", record);
     let Record(_, record_id, op) = record;
     match op {
         Operation::Get(key, check_bloom_filter, epoch, table_id, retention_seconds) => {
@@ -226,7 +228,7 @@ async fn handle_record(
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Sync(expected) = res {
                 let actual = sync_result.ok();
-                assert_eq!(actual, expected);
+                assert_eq!(actual, expected, "sync failed");
             }
         }
         Operation::Seal(epoch_id, is_checkpoint) => {
