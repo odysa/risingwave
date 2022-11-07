@@ -5403,6 +5403,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_test_runner",
+ "serde",
  "serial_test",
  "sync-point",
  "workspace-hack",

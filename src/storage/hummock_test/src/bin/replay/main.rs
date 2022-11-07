@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use replay_impl::HummockInterface;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_hummock_test::test_utils::get_replay_notification_client;
 use risingwave_hummock_trace::{
     HummockReplay, Operation, Record, Replayable, Result, TraceReader, TraceReaderImpl,
@@ -30,41 +30,39 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
+use serde::{Deserialize, Serialize};
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
     path: String,
+    // path to config file
+    #[arg(short, long, default_value = "src/config/risingwave.toml")]
+    config: String,
 }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    let opts = Args::parse();
-    let path = Path::new(&opts.path);
-    run_replay(path).await.unwrap();
+    let args = Args::parse();
+    run_replay(args).await.unwrap();
 }
 
-async fn run_replay(path: &Path) -> Result<()> {
+async fn run_replay(args: Args) -> Result<()> {
+    let path = Path::new(&args.path);
     let f = BufReader::new(File::open(path)?);
     let mut reader = TraceReaderImpl::new_bincode(f)?;
+    // first record is the snapshot
     let r = reader.read().unwrap();
-    let replay_interface = create_replay_hummock(r).await.unwrap();
-
+    let replay_interface = create_replay_hummock(r, &args).await.unwrap();
     let mut replayer = HummockReplay::new(reader, replay_interface);
-
     replayer.run().await.unwrap();
 
     Ok(())
 }
 
-async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
-    let config = StorageConfig {
-        data_directory: "hummock_003".to_string(),
-        local_object_store: "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
-            .to_string(),
-        ..Default::default()
-    };
+async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replayable>> {
+    let config: ReplayConfig = load_config(&args.config).expect("failed to read config file");
+    let config = Arc::new(config.storage);
 
-    let config = Arc::new(config);
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
     let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
     let object_store =
@@ -116,4 +114,9 @@ async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
     let replay_interface = HummockInterface::new(storage, notifier);
 
     Ok(Box::new(replay_interface))
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct ReplayConfig {
+    storage: StorageConfig,
 }
