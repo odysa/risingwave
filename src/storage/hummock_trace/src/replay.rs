@@ -81,7 +81,6 @@ impl<R: TraceReader> HummockReplay<R> {
         let mut total_ops: u64 = 0;
         let mut worker_record_map = HashMap::new();
         while let Ok(r) = self.reader.read() {
-            println!("read {:?}", r);
             let local_id = r.local_id();
             let record_id = r.record_id();
 
@@ -90,13 +89,13 @@ impl<R: TraceReader> HummockReplay<R> {
             match r.op() {
                 Operation::Result(trace_result) => {
                     if let Some(handler) = workers.get_mut(&worker_id) {
-                        // handler.send_result(trace_result.to_owned());
+                        handler.send_result(trace_result.to_owned());
                     }
                 }
                 Operation::Finish => {
                     if let Some(id) = worker_record_map.remove(&record_id) {
                         if let Some(handler) = workers.get_mut(&id) {
-                            // handler.wait_resp().await;
+                            handler.wait_resp().await;
                         }
                     }
                 }
@@ -115,12 +114,11 @@ impl<R: TraceReader> HummockReplay<R> {
                         }
                     });
 
-                    // handler.send_replay_req(ReplayRequest::Task(vec![r]));
+                    handler.send_replay_req(ReplayRequest::Task(vec![r]));
                     worker_record_map.insert(record_id, worker_id);
                     total_ops += 1;
                     if total_ops % 10000 == 0 {
                         println!("replayed {} ops", total_ops);
-                        break;
                     }
                 }
             };
@@ -145,8 +143,8 @@ impl<R: TraceReader> HummockReplay<R> {
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 enum WorkerId {
-    Actor(u32),
-    Executor(u32),
+    Actor(u64),
+    Executor(u64),
     None(u64),
 }
 
@@ -239,7 +237,7 @@ async fn handle_record(
             let actual = iter.next().await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::IterNext(expected) = res {
-                // assert_eq!(actual, expected, "iter_next result wrong");
+                assert_eq!(actual, expected, "iter_next result wrong");
             }
         }
         Operation::MetaMessage(resp) => {
