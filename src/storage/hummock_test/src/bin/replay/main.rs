@@ -58,24 +58,9 @@ async fn run_replay(path: &Path) -> Result<()> {
 
 async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
     let config = StorageConfig {
-        sstable_size_mb: 32,
-        block_size_kb: 64,
-        bloom_false_positive: 0.1,
-        share_buffers_sync_parallelism: 2,
-        share_buffer_compaction_worker_threads_number: 1,
-        shared_buffer_capacity_mb: 64,
         data_directory: "hummock_003".to_string(),
-        write_conflict_detection_enabled: true,
-        block_cache_capacity_mb: 64,
-        meta_cache_capacity_mb: 64,
-        disable_remote_compactor: false,
-        enable_local_spill: false,
         local_object_store: "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
             .to_string(),
-        // local_object_store: "memory".to_string(),
-        share_buffer_upload_concurrency: 1,
-        compactor_memory_limit_mb: 64,
-        sstable_id_remote_fetch_number: 1,
         ..Default::default()
     };
 
