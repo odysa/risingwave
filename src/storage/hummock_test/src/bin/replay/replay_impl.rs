@@ -152,20 +152,15 @@ impl Replayable for HummockInterface {
 
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
         let prev_version_id = match &info {
-            Info::HummockVersionDeltas(deltas) => {
-                // if let Some(v) = deltas.version_deltas.last() {
-                //     Some(v.prev_id)
-                // } else {
-                //     None
-                // }
-                return Ok(0);
-            }
+            Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
             _ => None,
         };
+
         let version = self.notifier.notify_hummock(op, info).await;
+
         // wait till version updated
         if let Some(prev_version_id) = prev_version_id {
-            let _ = self.store.wait_version_update(prev_version_id).await;
+            self.store.wait_version_update(prev_version_id).await;
         }
         Ok(version)
     }

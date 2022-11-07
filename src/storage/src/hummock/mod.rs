@@ -274,11 +274,11 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
-    pub async fn wait_version_update(&self, version_id: u64) -> u64 {
+    pub async fn wait_version_update(&self, old_id: u64) -> u64 {
         loop {
             yield_now().await;
             let cur_id = self.storage_core.read_version().read().committed().id();
-            if cur_id > version_id {
+            if cur_id > old_id {
                 return cur_id;
             }
         }

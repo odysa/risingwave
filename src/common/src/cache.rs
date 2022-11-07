@@ -799,12 +799,10 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         match self.lookup_for_request(hash, key.clone()) {
             LookupResult::Cached(entry) => Ok(Ok(entry)),
             LookupResult::WaitPendingRequest(recv) => {
-                println!("use pending req for key {:?}", hash);
                 let entry = recv.await?;
                 Ok(Ok(entry))
             }
             LookupResult::Miss => {
-                println!("new req for key {:?}", hash);
                 let this = self.clone();
                 let fetch_value = fetch_value();
                 let key2 = key.clone();
