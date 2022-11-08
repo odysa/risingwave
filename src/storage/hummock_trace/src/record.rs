@@ -109,12 +109,12 @@ pub enum Operation {
     Finish,
 
     /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
-    MetaMessage(TraceSubResp),
+    MetaMessage(Box<TraceSubResp>),
 
     Result(OperationResult),
 }
 
-/// TraceResult discards Error and only marks whether succeeded or not.
+/// `TraceResult` discards Error and only marks whether succeeded or not.
 /// Use Option rather than Result because it's overhead to serialize Error.
 type TraceResult<T> = Option<T>;
 

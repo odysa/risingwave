@@ -214,7 +214,7 @@ async fn handle_record(
                 .await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Iter(expected) = res {
-                if let Some(_) = expected {
+                if expected.is_some() {
                     iters_map.insert(record_id, iter.unwrap());
                 } else {
                     assert!(iter.is_err());
