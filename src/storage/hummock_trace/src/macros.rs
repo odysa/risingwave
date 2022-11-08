@@ -89,8 +89,7 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
-        // convert type to Option<Option<Vec<u8>>>
-        let res = $result
+        let res: Option<Option<Vec<u8>>> = $result
             .as_ref()
             .map(Clone::clone)
             .ok()
