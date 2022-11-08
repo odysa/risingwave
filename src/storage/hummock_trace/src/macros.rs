@@ -78,7 +78,9 @@ macro_rules! trace {
     };
     (METAMSG, $resp:ident) => {
         let _span = $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::MetaMessage($crate::record::TraceSubResp($resp.clone())),
+            $crate::record::Operation::MetaMessage(Box::new($crate::record::TraceSubResp(
+                $resp.clone(),
+            ))),
             risingwave_common::hm_trace::TraceLocalId::None,
         );
     };
