@@ -171,7 +171,7 @@ mod tests {
 
     use parking_lot::Mutex;
 
-    use crate::RecordIdGenerator;
+    use super::*;
 
     // test atomic id
     #[tokio::test(flavor = "multi_thread")]
