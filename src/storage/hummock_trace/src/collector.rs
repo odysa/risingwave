@@ -24,7 +24,6 @@ use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{Operation, Record, RecordId, RecordIdGenerator};
 
 // create a global singleton of collector as well as record id generator
-// https://stackoverflow.com/questions/27791532/how-do-i-create-a-global-mutable-singleton
 lazy_static! {
     static ref GLOBAL_COLLECTOR: GlobalCollector = GlobalCollector::new();
     static ref GLOBAL_RECORD_ID: RecordIdGenerator = RecordIdGenerator::new();
@@ -54,8 +53,8 @@ pub fn init_collector() {
         .create(true)
         .open(path)
         .expect("failed to open log file");
-
-    let writer = BufWriter::new(f);
+    //
+    let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
     tokio::spawn(GLOBAL_COLLECTOR.run(Box::new(writer)));
 }
@@ -88,40 +87,45 @@ impl GlobalCollector {
         writer_handle.await.expect("failed to stop writer thread");
     }
 
-    async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
-        let mut size = 0;
-        loop {
-            if let Ok(msg) = rx.recv_async().await {
-                match msg {
-                    WriteMsg::Write(record) => {
-                        size += writer.write(record).expect("failed to write the log file");
-                        // default to use a BufWriter, must flush memory
-                        if size > WRITER_BUFFER_SIZE {
-                            writer.flush().expect("failed to sync file");
-                            size = 0;
-                        }
-                    }
-                    WriteMsg::Shutdown => {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
     async fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
+        let mut records = Vec::new();
         loop {
             if let Ok(message) = rx.recv_async().await {
                 match message {
                     RecordMsg::Record(record) => {
-                        writer_tx
-                            .send(WriteMsg::Write(record))
-                            .expect("failed to send write req");
+                        records.push(record);
                     }
                     RecordMsg::Shutdown => {
                         writer_tx
+                            .send(WriteMsg::Write(records))
+                            .expect("failed to send write req");
+                        writer_tx
                             .send(WriteMsg::Shutdown)
                             .expect("failed to kill writer thread");
+                        return;
+                    }
+                }
+            }
+            if !records.is_empty() && !rx.is_empty() {
+                writer_tx
+                    .send(WriteMsg::Write(records))
+                    .expect("failed to send write req");
+                records = Vec::new();
+            }
+        }
+    }
+
+    async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
+        loop {
+            if let Ok(msg) = rx.recv_async().await {
+                match msg {
+                    WriteMsg::Write(records) => {
+                        writer
+                            .write_all(records)
+                            .expect("failed to write the log file");
+                    }
+                    WriteMsg::Shutdown => {
+                        writer.flush().expect("failed to flush content");
                         return;
                     }
                 }
@@ -214,7 +218,7 @@ pub enum RecordMsg {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum WriteMsg {
-    Write(Record),
+    Write(Vec<Record>),
     Shutdown,
 }
 
@@ -297,10 +301,7 @@ mod tests {
         let op = Operation::Get(vec![103, 200, 234], true, 1, 1, Some(1));
         let mut mock_writer = MockTraceWriter::new();
 
-        mock_writer
-            .expect_write()
-            .times(count * 2)
-            .returning(|_| Ok(0));
+        mock_writer.expect_write_all().returning(|_| Ok(0));
 
         let _collector = collector.clone();
 
