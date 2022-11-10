@@ -14,12 +14,12 @@
 
 #[macro_export]
 macro_rules! trace {
-    (GET, $key:ident, $bloom_filter:ident, $opt:ident) => {
+    (GET, $key:ident, $epoch:ident, $opt:ident) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Get(
                 $key.to_vec(),
-                $bloom_filter,
-                $opt.epoch,
+                $opt.check_bloom_filter,
+                $epoch,
                 $opt.table_id.table_id,
                 $opt.retention_seconds,
             ),
@@ -38,14 +38,14 @@ macro_rules! trace {
             risingwave_common::hm_trace::task_local_get(),
         );
     };
-    (ITER, $prefix:ident, $range:ident, $opt:ident) => {
+    (ITER, $range:ident, $epoch:ident, $opt:ident) => {
         // do not assign iter span to a variable
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Iter(
-                $prefix.clone(),
+                $opt.prefix_hint.clone(),
                 $range.0.clone(),
                 $range.1.clone(),
-                $opt.epoch,
+                $epoch,
                 $opt.table_id.table_id,
                 $opt.retention_seconds,
             ),

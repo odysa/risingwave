@@ -50,7 +50,7 @@ pub struct MonitoredStateStore<S> {
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         #[cfg(hm_trace)]
-        let inner = Box::new(TracedStateStore::new(inner));
+        let inner = TracedStateStore::new(inner);
         Self {
             inner: Box::new(inner),
             stats,

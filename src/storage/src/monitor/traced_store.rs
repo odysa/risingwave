@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_trace::{
@@ -21,8 +23,12 @@ use risingwave_hummock_trace::{
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
+use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{define_state_store_associated_type, StateStore};
+use crate::{
+    define_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type, StateStore, StateStoreIter,
+};
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
@@ -40,12 +46,12 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-impl<S: StateStore> TracedStateStore<S> {
+impl<S: StateStoreRead> TracedStateStore<S> {
     async fn traced_iter<'a, I>(
         &self,
         inner: I,
         record_id: RecordId,
-    ) -> StorageResult<<TracedStateStore<S> as StateStore>::Iter>
+    ) -> StorageResult<<TracedStateStore<S> as StateStoreRead>::Iter>
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
@@ -57,92 +63,14 @@ impl<S: StateStore> TracedStateStore<S> {
     }
 }
 
+impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {}
+
 impl<S: StateStore> StateStore for TracedStateStore<S> {
-    type Iter = TracedStateStoreIter<S::Iter>;
+    type Local = TracedStateStore<S::Local>;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
-
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        check_bloom_filter: bool,
-        read_options: crate::store::ReadOptions,
-    ) -> Self::GetFuture<'_> {
-        async move {
-            let span: TraceSpan = trace!(GET, key, check_bloom_filter, read_options);
-            let res: StorageResult<Option<Bytes>> =
-                self.inner.get(key, check_bloom_filter, read_options).await;
-            trace_result!(GET, span, res);
-            res
-        }
-    }
-
-    fn scan(
-        &self,
-        prefix_hint: Option<Vec<u8>>,
-        key_range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
-        limit: Option<usize>,
-        read_options: crate::store::ReadOptions,
-    ) -> Self::ScanFuture<'_> {
-        async move {
-            self.inner
-                .scan(prefix_hint, key_range, limit, read_options)
-                .await
-        }
-    }
-
-    fn backward_scan(
-        &self,
-        key_range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
-        limit: Option<usize>,
-        read_options: crate::store::ReadOptions,
-    ) -> Self::BackwardScanFuture<'_> {
-        async move {
-            self.inner
-                .backward_scan(key_range, limit, read_options)
-                .await
-        }
-    }
-
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(bytes::Bytes, crate::storage_value::StorageValue)>,
-        write_options: crate::store::WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        async move {
-            let span: TraceSpan = trace!(INGEST, kv_pairs, write_options);
-            let res: StorageResult<usize> = self.inner.ingest_batch(kv_pairs, write_options).await;
-            trace_result!(INGEST, span, res);
-            res
-        }
-    }
-
-    fn iter(
-        &self,
-        prefix_hint: Option<Vec<u8>>,
-        key_range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
-        read_options: crate::store::ReadOptions,
-    ) -> Self::IterFuture<'_> {
-        async move {
-            let span = trace!(ITER, prefix_hint, key_range, read_options);
-            let iter = self
-                .traced_iter(
-                    self.inner.iter(prefix_hint, key_range, read_options),
-                    span.id(),
-                )
-                .await;
-            trace_result!(ITER, span, iter);
-            iter
-        }
-    }
-
-    fn backward_iter(
-        &self,
-        key_range: (std::ops::Bound<Vec<u8>>, std::ops::Bound<Vec<u8>>),
-        read_options: crate::store::ReadOptions,
-    ) -> Self::BackwardIterFuture<'_> {
-        self.traced_iter(self.inner.backward_iter(key_range, read_options), 0)
-    }
 
     fn try_wait_epoch(
         &self,
@@ -167,6 +95,67 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { self.inner.clear_shared_buffer().await }
+    }
+
+    fn new_local(&self, table_id: risingwave_common::catalog::TableId) -> Self::NewLocalFuture<'_> {
+        async move { TracedStateStore::new(self.inner.new_local(table_id).await) }
+    }
+}
+
+impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
+    type Iter = TracedStateStoreIter<S::Iter>;
+
+    define_state_store_read_associated_type!();
+
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        read_options: crate::store::ReadOptions,
+    ) -> Self::GetFuture<'_> {
+        async move {
+            let span: TraceSpan = trace!(GET, key, epoch, read_options);
+            let res: StorageResult<Option<Bytes>> = self.inner.get(key, epoch, read_options).await;
+            trace_result!(GET, span, res);
+            res
+        }
+    }
+
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        async move {
+            let span = trace!(ITER, key_range, epoch, read_options);
+            let iter = self
+                .traced_iter(self.inner.iter(key_range, epoch, read_options), span.id())
+                .await;
+            trace_result!(ITER, span, iter);
+            iter
+        }
+    }
+}
+
+impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
+    define_state_store_write_associated_type!();
+
+    fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+        write_options: WriteOptions,
+    ) -> Self::IngestBatchFuture<'_> {
+        async move {
+            let span: TraceSpan = trace!(INGEST, kv_pairs, write_options);
+            let res: StorageResult<usize> = self
+                .inner
+                .ingest_batch(kv_pairs, delete_ranges, write_options)
+                .await;
+            trace_result!(INGEST, span, res);
+            res
+        }
     }
 }
 
