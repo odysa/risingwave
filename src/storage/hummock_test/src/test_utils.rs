@@ -246,7 +246,7 @@ fn assert_result_eq<Item: PartialEq + Debug, E>(
     }
 }
 
-pub(crate) struct LocalGlobalStateStoreHolder<L, G> {
+pub struct LocalGlobalStateStoreHolder<L, G> {
     pub(crate) local: L,
     pub(crate) global: G,
 }
@@ -362,7 +362,7 @@ where
 }
 
 impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
-    pub(crate) async fn new(state_store: G) -> Self {
+    pub async fn new(state_store: G) -> Self {
         LocalGlobalStateStoreHolder {
             local: state_store.new_local(TEST_TABLE_ID).await,
             global: state_store,
@@ -370,7 +370,7 @@ impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
     }
 }
 
-pub(crate) type HummockV2MixedStateStore =
+pub type HummockV2MixedStateStore =
     LocalGlobalStateStoreHolder<LocalHummockStorage, HummockStorage>;
 
 impl Deref for HummockV2MixedStateStore {

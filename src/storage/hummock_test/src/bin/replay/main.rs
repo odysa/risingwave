@@ -21,7 +21,9 @@ use std::sync::Arc;
 use clap::Parser;
 use replay_impl::HummockInterface;
 use risingwave_common::config::{load_config, StorageConfig};
-use risingwave_hummock_test::test_utils::get_replay_notification_client;
+use risingwave_hummock_test::test_utils::{
+    get_replay_notification_client, HummockV2MixedStateStore,
+};
 use risingwave_hummock_trace::{
     HummockReplay, Operation, Record, Replayable, Result, TraceReader, TraceReaderImpl,
 };
@@ -66,7 +68,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
     let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
     let object_store =
-        parse_remote_object_store(&config.local_object_store, object_store_stats).await;
+        parse_remote_object_store(&config.local_object_store, object_store_stats, false).await;
 
     let sstable_store = {
         let tiered_cache = TieredCache::none();
@@ -110,7 +112,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
     )
     .await
     .expect("fail to create a HummockStorage object");
-
+    let storage = HummockV2MixedStateStore::new(storage).await;
     let replay_interface = HummockInterface::new(storage, notifier);
 
     Ok(Box::new(replay_interface))

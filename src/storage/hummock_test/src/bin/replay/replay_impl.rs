@@ -16,13 +16,16 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_test::test_utils::HummockV2MixedStateStore;
 use risingwave_hummock_trace::{ReplayIter, Replayable, Result, TraceError};
 use risingwave_meta::manager::NotificationManagerRef;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, SyncResult, WriteOptions};
+use risingwave_storage::store::{
+    LocalStateStore, ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+};
 use risingwave_storage::{StateStore, StateStoreIter};
 
 pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (Bytes, Bytes)>>(I);
@@ -42,12 +45,15 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)> + Send + Sync> ReplayIter for Humm
 }
 
 pub(crate) struct HummockInterface {
-    store: HummockStorage,
+    store: HummockV2MixedStateStore,
     notifier: NotificationManagerRef<MemStore>,
 }
 
 impl HummockInterface {
-    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
+    pub(crate) fn new(
+        store: HummockV2MixedStateStore,
+        notifier: NotificationManagerRef<MemStore>,
+    ) -> Self {
         Self { store, notifier }
     }
 }
@@ -66,11 +72,12 @@ impl Replayable for HummockInterface {
             .store
             .get(
                 &key,
-                check_bloom_filter,
+                epoch,
                 ReadOptions {
-                    epoch,
+                    check_bloom_filter,
                     table_id: TableId { table_id },
                     retention_seconds,
+                    prefix_hint: None,
                 },
             )
             .await
@@ -96,15 +103,11 @@ impl Replayable for HummockInterface {
                 )
             })
             .collect();
+        let table_id = TableId { table_id };
+
         let size = self
             .store
-            .ingest_batch(
-                kv_pairs,
-                WriteOptions {
-                    epoch,
-                    table_id: TableId { table_id },
-                },
-            )
+            .ingest_batch(kv_pairs, vec![], WriteOptions { epoch, table_id })
             .await
             .map_err(|_| TraceError::IngestFailed)?;
         Ok(size)
@@ -122,12 +125,13 @@ impl Replayable for HummockInterface {
         let iter = self
             .store
             .iter(
-                prefix_hint,
-                (left_bound.clone(), right_bound.clone()),
+                (left_bound, right_bound),
+                epoch,
                 ReadOptions {
-                    epoch,
+                    prefix_hint,
                     table_id: TableId { table_id },
                     retention_seconds,
+                    check_bloom_filter: false,
                 },
             )
             .await
