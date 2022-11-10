@@ -16,21 +16,26 @@
 macro_rules! trace {
     (GET, $key:ident, $epoch:ident, $opt:ident) => {
         $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Get(
+            $crate::record::Operation::get(
                 $key.to_vec(),
-                $opt.check_bloom_filter,
                 $epoch,
-                $opt.table_id.table_id,
+                $opt.prefix_hint.clone(),
+                $opt.check_bloom_filter,
                 $opt.retention_seconds,
+                $opt.table_id.table_id,
             ),
             risingwave_common::hm_trace::task_local_get(),
         );
     };
-    (INGEST, $kvs:ident, $opt:ident) => {
+    (INGEST, $kvs:ident, $delete_range:ident, $opt:ident) => {
         $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Ingest(
+            $crate::record::Operation::ingest(
                 $kvs.iter()
-                    .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|v| v.to_vec())))
+                    .map(|(k, v)| (k.to_vec(), v.user_value.clone().map(|b| b.to_vec())))
+                    .collect(),
+                $delete_range
+                    .iter()
+                    .map(|(k, v)| (k.to_vec(), v.to_vec()))
                     .collect(),
                 $opt.epoch,
                 $opt.table_id.table_id,

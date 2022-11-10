@@ -65,6 +65,7 @@ impl Replayable for HummockInterface {
         key: Vec<u8>,
         check_bloom_filter: bool,
         epoch: u64,
+        prefix_hint: Option<Vec<u8>>,
         table_id: u32,
         retention_seconds: Option<u32>,
     ) -> Result<Option<Vec<u8>>> {
@@ -77,7 +78,7 @@ impl Replayable for HummockInterface {
                     check_bloom_filter,
                     table_id: TableId { table_id },
                     retention_seconds,
-                    prefix_hint: None,
+                    prefix_hint: prefix_hint,
                 },
             )
             .await
@@ -89,6 +90,7 @@ impl Replayable for HummockInterface {
     async fn ingest(
         &self,
         mut kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+        mut delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
         epoch: u64,
         table_id: u32,
     ) -> Result<usize> {
@@ -103,13 +105,20 @@ impl Replayable for HummockInterface {
                 )
             })
             .collect();
+
+        let delete_ranges = delete_ranges
+            .drain(..)
+            .map(|(left, right)| (Bytes::from(left), Bytes::from(right)))
+            .collect();
+
         let table_id = TableId { table_id };
 
         let size = self
             .store
-            .ingest_batch(kv_pairs, vec![], WriteOptions { epoch, table_id })
+            .ingest_batch(kv_pairs, delete_ranges, WriteOptions { epoch, table_id })
             .await
             .map_err(|_| TraceError::IngestFailed)?;
+
         Ok(size)
     }
 

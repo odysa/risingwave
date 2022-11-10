@@ -111,7 +111,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         &'a self,
         key: &'a [u8],
         epoch: u64,
-        read_options: crate::store::ReadOptions,
+        read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
             let span: TraceSpan = trace!(GET, key, epoch, read_options);
@@ -148,7 +148,7 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            let span: TraceSpan = trace!(INGEST, kv_pairs, write_options);
+            let span: TraceSpan = trace!(INGEST, kv_pairs, delete_ranges, write_options);
             let res: StorageResult<usize> = self
                 .inner
                 .ingest_batch(kv_pairs, delete_ranges, write_options)

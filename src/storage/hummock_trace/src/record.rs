@@ -68,17 +68,31 @@ impl Record {
 
 type TraceKey = Vec<u8>;
 type TraceValue = Vec<u8>;
-
+type TableId = u32;
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
     /// Get operation of Hummock.
     /// (key, check_bloom_filter, epoch, table_id, retention_seconds)
-    Get(TraceKey, bool, u64, u32, Option<u32>),
+    // Get(TraceKey, bool, u64, u32, Option<u32>),
+    Get {
+        key: TraceKey,
+        epoch: u64,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
+    },
 
     /// Ingest operation of Hummock.
     /// (kv_pairs, epoch, table_id)
-    Ingest(Vec<(TraceKey, Option<TraceValue>)>, u64, u32),
+    // Ingest(Vec<(TraceKey, Option<TraceValue>)>, u64, u32),
+    Ingest {
+        kv_pairs: Vec<(TraceKey, Option<TraceValue>)>,
+        delete_ranges: Vec<(TraceKey, TraceKey)>,
+        epoch: u64,
+        table_id: TableId,
+    },
 
     /// Iter operation of Hummock
     /// (prefix_hint, left_bound, right_bound, epoch, table_id, retention_seconds)
@@ -113,6 +127,40 @@ pub enum Operation {
     MetaMessage(Box<TraceSubResp>),
 
     Result(OperationResult),
+}
+
+impl Operation {
+    pub fn get(
+        key: TraceKey,
+        epoch: u64,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
+    ) -> Operation {
+        Operation::Get {
+            key,
+            epoch,
+            prefix_hint,
+            check_bloom_filter,
+            retention_seconds,
+            table_id,
+        }
+    }
+
+    pub fn ingest(
+        kv_pairs: Vec<(TraceKey, Option<TraceValue>)>,
+        delete_ranges: Vec<(TraceKey, TraceKey)>,
+        epoch: u64,
+        table_id: TableId,
+    ) -> Operation {
+        Operation::Ingest {
+            kv_pairs,
+            delete_ranges,
+            epoch,
+            table_id,
+        }
+    }
 }
 
 /// `TraceResult` discards Error and only marks whether succeeded or not.
