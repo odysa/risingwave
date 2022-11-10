@@ -104,8 +104,8 @@ mod test {
 
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
-        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, RecordIdGenerator,
-        TraceSubResp, MAGIC_BYTES,
+        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TraceSubResp,
+        MAGIC_BYTES,
     };
 
     mock! {

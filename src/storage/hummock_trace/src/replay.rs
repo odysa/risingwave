@@ -93,9 +93,10 @@ impl<R: TraceReader> HummockReplay<R> {
                     }
                 }
                 Operation::Finish => {
-                    if let Some(id) = worker_record_map.remove(&record_id) {
-                        if let Some(handler) = workers.get_mut(&id) {
-                            handler.wait_resp().await;
+                    if let Some(handler) = workers.get_mut(&worker_id) {
+                        handler.wait_resp().await;
+                        if let TraceLocalId::None = local_id {
+                            workers.remove(&worker_id);
                         }
                     }
                 }

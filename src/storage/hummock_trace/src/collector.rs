@@ -163,22 +163,24 @@ impl Drop for GlobalCollector {
 pub struct TraceSpan {
     tx: Sender<RecordMsg>,
     id: RecordId,
+    local_id: TraceLocalId,
 }
 
 impl TraceSpan {
-    pub fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
-        Self { tx, id }
+    pub fn new(tx: Sender<RecordMsg>, id: RecordId, local_id: TraceLocalId) -> Self {
+        Self { tx, id, local_id }
     }
 
-    pub fn send(&self, op: Operation, local_id: TraceLocalId) {
+    pub fn send(&self, op: Operation) {
         self.tx
-            .send(RecordMsg::Record(Record::new(local_id, self.id, op)))
+            .send(RecordMsg::Record(Record::new(self.local_id, self.id, op)))
             .expect("failed to log record");
     }
 
     pub fn finish(&self) {
         self.tx
-            .send(RecordMsg::Record(Record::new_local_none(
+            .send(RecordMsg::Record(Record::new(
+                self.local_id,
                 self.id,
                 Operation::Finish,
             )))
@@ -191,15 +193,15 @@ impl TraceSpan {
 
     /// Create a span and send operation to the `GLOBAL_COLLECTOR`
     pub fn new_to_global(op: Operation, local_id: TraceLocalId) -> Self {
-        let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
-        span.send(op, local_id);
+        let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next(), local_id);
+        span.send(op);
         span
     }
 
     #[cfg(test)]
     pub fn new_op(tx: Sender<RecordMsg>, id: RecordId, op: Operation) -> Self {
-        let span = TraceSpan::new(tx, id);
-        span.send(op, TraceLocalId::None);
+        let span = TraceSpan::new(tx, id, TraceLocalId::None);
+        span.send(op);
         span
     }
 }
