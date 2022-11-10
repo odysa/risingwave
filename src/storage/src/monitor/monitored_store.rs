@@ -182,7 +182,10 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
+    #[cfg(not(hm_trace))]
     type Local = MonitoredStateStore<S::Local>;
+    #[cfg(hm_trace)]
+    type Local = MonitoredStateStore<TracedStateStore<S::Local>>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
