@@ -17,6 +17,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
 use std::path::Path;
 
+use either::Either;
 use flume::{unbounded, Receiver, Sender};
 use risingwave_common::hm_trace::TraceLocalId;
 
@@ -92,15 +93,15 @@ impl GlobalCollector {
         loop {
             if let Ok(message) = rx.recv_async().await {
                 match message {
-                    RecordMsg::Record(record) => {
+                    RecordMsg::Left(record) => {
                         records.push(record);
                     }
-                    RecordMsg::Shutdown => {
+                    RecordMsg::Right(()) => {
                         writer_tx
-                            .send(WriteMsg::Write(records))
+                            .send(WriteMsg::Left(records))
                             .expect("failed to send write req");
                         writer_tx
-                            .send(WriteMsg::Shutdown)
+                            .send(WriteMsg::Right(()))
                             .expect("failed to kill writer thread");
                         return;
                     }
@@ -108,7 +109,7 @@ impl GlobalCollector {
             }
             if !records.is_empty() && !rx.is_empty() {
                 writer_tx
-                    .send(WriteMsg::Write(records))
+                    .send(WriteMsg::Left(records))
                     .expect("failed to send write req");
                 records = Vec::new();
             }
@@ -119,12 +120,12 @@ impl GlobalCollector {
         loop {
             if let Ok(msg) = rx.recv_async().await {
                 match msg {
-                    WriteMsg::Write(records) => {
+                    WriteMsg::Left(records) => {
                         writer
                             .write_all(records)
                             .expect("failed to write the log file");
                     }
-                    WriteMsg::Shutdown => {
+                    WriteMsg::Right(()) => {
                         writer.flush().expect("failed to flush content");
                         return;
                     }
@@ -135,7 +136,7 @@ impl GlobalCollector {
 
     fn finish(&self) {
         self.tx
-            .send(RecordMsg::Shutdown)
+            .send(Either::Right(()))
             .expect("failed to finish collector");
     }
 
@@ -173,13 +174,13 @@ impl TraceSpan {
 
     pub fn send(&self, op: Operation) {
         self.tx
-            .send(RecordMsg::Record(Record::new(self.local_id, self.id, op)))
+            .send(Either::Left(Record::new(self.local_id, self.id, op)))
             .expect("failed to log record");
     }
 
     pub fn finish(&self) {
         self.tx
-            .send(RecordMsg::Record(Record::new(
+            .send(Either::Left(Record::new(
                 self.local_id,
                 self.id,
                 Operation::Finish,
@@ -212,17 +213,8 @@ impl Drop for TraceSpan {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum RecordMsg {
-    Record(Record),
-    Shutdown,
-}
-
-#[derive(Debug, PartialEq)]
-pub(crate) enum WriteMsg {
-    Write(Vec<Record>),
-    Shutdown,
-}
+pub type RecordMsg = Either<Record, ()>;
+pub type WriteMsg = Either<Vec<Record>, ()>;
 
 #[cfg(test)]
 mod tests {
@@ -248,8 +240,8 @@ mod tests {
         let msg2 = rx.recv().unwrap();
 
         assert!(rx.is_empty());
-        assert_eq!(msg1, RecordMsg::Record(record1));
-        assert_eq!(msg2, RecordMsg::Record(record2));
+        assert_eq!(msg1, Either::Left(record1));
+        assert_eq!(msg2, Either::Left(record2));
 
         drop(_span1);
         drop(_span2);
@@ -260,11 +252,11 @@ mod tests {
         assert!(rx.is_empty());
         assert_eq!(
             msg1,
-            RecordMsg::Record(Record::new_local_none(0, Operation::Finish))
+            Either::Left(Record::new_local_none(0, Operation::Finish))
         );
         assert_eq!(
             msg2,
-            RecordMsg::Record(Record::new_local_none(1, Operation::Finish))
+            Either::Left(Record::new_local_none(1, Operation::Finish))
         );
     }
 
