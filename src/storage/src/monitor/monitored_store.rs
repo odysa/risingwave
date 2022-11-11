@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_trace::StorageType;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -50,7 +51,7 @@ pub struct MonitoredStateStore<S> {
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         #[cfg(hm_trace)]
-        let inner = TracedStateStore::new(inner);
+        let inner = TracedStateStore::new(inner, StorageType::Global);
         Self {
             inner: Box::new(inner),
             stats,

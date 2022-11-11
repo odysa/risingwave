@@ -216,6 +216,12 @@ impl Drop for TraceSpan {
 pub type RecordMsg = Either<Record, ()>;
 pub type WriteMsg = Either<Vec<Record>, ()>;
 
+#[derive(Clone, Copy)]
+pub enum StorageType{
+    Global,
+    Local,
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

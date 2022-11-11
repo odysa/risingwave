@@ -17,7 +17,7 @@ use std::ops::Bound;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_trace::{
-    init_collector, trace, trace_result, OperationResult, RecordId, TraceSpan,
+    init_collector, trace, trace_result, OperationResult, RecordId, TraceSpan, StorageType,
 };
 
 use crate::error::StorageResult;
@@ -30,24 +30,19 @@ use crate::{
     define_state_store_write_associated_type, StateStore, StateStoreIter,
 };
 
-#[derive(Clone)]
-enum StorageType {
-    Local,
-    Global,
-}
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
     inner: S,
-    storage_type: StorageType,
+    storage_type: StorageType
 }
 
 impl<S> TracedStateStore<S> {
-    pub fn new(inner: S) -> Self {
+    pub fn new(inner: S, storage_type: StorageType) -> Self {
         init_collector();
         Self {
             inner,
-            storage_type: StorageType::Global,
+            storage_type
         }
     }
 
@@ -108,7 +103,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     }
 
     fn new_local(&self, table_id: risingwave_common::catalog::TableId) -> Self::NewLocalFuture<'_> {
-        async move { TracedStateStore::new(self.inner.new_local(table_id).await) }
+        async move { TracedStateStore::new(self.inner.new_local(table_id).await, StorageType::Local) }
     }
 }
 
