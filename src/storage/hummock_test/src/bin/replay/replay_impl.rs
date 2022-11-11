@@ -16,15 +16,15 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_test::test_utils::HummockV2MixedStateStore;
-use risingwave_hummock_trace::{ReplayIter, Replayable, Result, TraceError};
+use risingwave_hummock_trace::{LocalReplay, ReplayIter, Replayable, Result, TraceError};
 use risingwave_meta::manager::NotificationManagerRef;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
+use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+    ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
 };
 use risingwave_storage::{StateStore, StateStoreIter};
 
@@ -45,21 +45,57 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)> + Send + Sync> ReplayIter for Humm
 }
 
 pub(crate) struct HummockInterface {
-    store: HummockV2MixedStateStore,
+    store: HummockStorage,
     notifier: NotificationManagerRef<MemStore>,
 }
 
 impl HummockInterface {
-    pub(crate) fn new(
-        store: HummockV2MixedStateStore,
-        notifier: NotificationManagerRef<MemStore>,
-    ) -> Self {
+    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
         Self { store, notifier }
     }
 }
 
 #[async_trait::async_trait]
 impl Replayable for HummockInterface {
+    async fn sync(&self, id: u64) -> Result<usize> {
+        let result: SyncResult = self
+            .store
+            .sync(id)
+            .await
+            .map_err(|_| TraceError::SyncFailed)?;
+        Ok(result.sync_size)
+    }
+
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
+        self.store.seal_epoch(epoch_id, is_checkpoint);
+    }
+
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
+        let prev_version_id = match &info {
+            Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
+            _ => None,
+        };
+
+        let version = self.notifier.notify_hummock(op, info).await;
+
+        // wait till version updated
+        if let Some(prev_version_id) = prev_version_id {
+            self.store.wait_version_update(prev_version_id).await;
+        }
+        Ok(version)
+    }
+
+    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay> {
+        let table_id = TableId { table_id };
+        let local_storage = self.store.new_local(table_id).await;
+        Box::new(LocalReplayInterface(local_storage))
+    }
+}
+
+pub(crate) struct LocalReplayInterface(LocalHummockStorage);
+
+#[async_trait::async_trait]
+impl LocalReplay for LocalReplayInterface {
     async fn get(
         &self,
         key: Vec<u8>,
@@ -70,7 +106,7 @@ impl Replayable for HummockInterface {
         retention_seconds: Option<u32>,
     ) -> Result<Option<Vec<u8>>> {
         let value = self
-            .store
+            .0
             .get(
                 &key,
                 epoch,
@@ -114,7 +150,7 @@ impl Replayable for HummockInterface {
         let table_id = TableId { table_id };
 
         let size = self
-            .store
+            .0
             .ingest_batch(kv_pairs, delete_ranges, WriteOptions { epoch, table_id })
             .await
             .map_err(|_| TraceError::IngestFailed)?;
@@ -132,7 +168,7 @@ impl Replayable for HummockInterface {
         retention_seconds: Option<u32>,
     ) -> Result<Box<dyn ReplayIter>> {
         let iter = self
-            .store
+            .0
             .iter(
                 (left_bound, right_bound),
                 epoch,
@@ -148,33 +184,5 @@ impl Replayable for HummockInterface {
 
         let iter = HummockReplayIter::new(iter);
         Ok(Box::new(iter))
-    }
-
-    async fn sync(&self, id: u64) -> Result<usize> {
-        let result: SyncResult = self
-            .store
-            .sync(id)
-            .await
-            .map_err(|_| TraceError::SyncFailed)?;
-        Ok(result.sync_size)
-    }
-
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
-        self.store.seal_epoch(epoch_id, is_checkpoint);
-    }
-
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
-        let prev_version_id = match &info {
-            Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d| d.prev_id),
-            _ => None,
-        };
-
-        let version = self.notifier.notify_hummock(op, info).await;
-
-        // wait till version updated
-        if let Some(prev_version_id) = prev_version_id {
-            self.store.wait_version_update(prev_version_id).await;
-        }
-        Ok(version)
     }
 }

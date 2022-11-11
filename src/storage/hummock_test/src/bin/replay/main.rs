@@ -112,7 +112,6 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<Box<dyn Replaya
     )
     .await
     .expect("fail to create a HummockStorage object");
-    let storage = HummockV2MixedStateStore::new(storage).await;
     let replay_interface = HummockInterface::new(storage, notifier);
 
     Ok(Box::new(replay_interface))

@@ -31,14 +31,24 @@ use crate::{
 };
 
 #[derive(Clone)]
+enum StorageType {
+    Local,
+    Global,
+}
+
+#[derive(Clone)]
 pub struct TracedStateStore<S> {
     inner: S,
+    storage_type: StorageType,
 }
 
 impl<S> TracedStateStore<S> {
     pub fn new(inner: S) -> Self {
         init_collector();
-        Self { inner }
+        Self {
+            inner,
+            storage_type: StorageType::Global,
+        }
     }
 
     pub fn inner(&self) -> &S {
