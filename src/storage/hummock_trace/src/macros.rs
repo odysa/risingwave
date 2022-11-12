@@ -44,16 +44,15 @@ macro_rules! trace {
         );
     };
     (ITER, $range:ident, $epoch:ident, $opt:ident) => {
-        // do not assign iter span to a variable
         $crate::collector::TraceSpan::new_to_global(
-            $crate::record::Operation::Iter(
-                $opt.prefix_hint.clone(),
-                $range.0.clone(),
-                $range.1.clone(),
-                $epoch,
-                $opt.table_id.table_id,
-                $opt.retention_seconds,
-            ),
+            $crate::record::Operation::Iter {
+                prefix_hint: $opt.prefix_hint.clone(),
+                key_range: $range.clone(),
+                epoch: $epoch,
+                table_id: $opt.table_id.table_id,
+                retention_seconds: $opt.retention_seconds,
+                check_bloom_filter: $opt.check_bloom_filter,
+            },
             risingwave_common::hm_trace::task_local_get(),
         );
     };
@@ -114,7 +113,7 @@ macro_rules! trace_result {
         )));
     };
     (ITER_NEXT, $span:ident, $pair:ident) => {
-        let res = $pair.clone().map(|(k, v)| (k.to_vec(), v.to_vec()));
+        let res = $pair.as_ref().map(|(k, v)| (k.to_vec(), v.to_vec()));
         $span.send($crate::record::Operation::Result(
             OperationResult::IterNext(res),
         ));

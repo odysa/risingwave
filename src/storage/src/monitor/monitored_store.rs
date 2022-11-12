@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
+#[cfg(hm_trace)]
 use risingwave_hummock_trace::StorageType;
 use tracing::error;
 
@@ -148,6 +149,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
+        println!("begin monitored iter");
         self.monitored_iter(self.inner.iter(key_range, epoch, read_options))
     }
 }

@@ -160,23 +160,24 @@ impl LocalReplay for LocalReplayInterface {
 
     async fn iter(
         &self,
-        prefix_hint: Option<Vec<u8>>,
-        left_bound: Bound<Vec<u8>>,
-        right_bound: Bound<Vec<u8>>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
-        table_id: u32,
+        prefix_hint: Option<Vec<u8>>,
+        check_bloom_filter: bool,
         retention_seconds: Option<u32>,
+        table_id: u32,
     ) -> Result<Box<dyn ReplayIter>> {
+        let table_id = TableId { table_id };
         let iter = self
             .0
             .iter(
-                (left_bound, right_bound),
+                key_range,
                 epoch,
                 ReadOptions {
                     prefix_hint,
-                    table_id: TableId { table_id },
+                    table_id,
                     retention_seconds,
-                    check_bloom_filter: false,
+                    check_bloom_filter,
                 },
             )
             .await

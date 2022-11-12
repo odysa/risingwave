@@ -56,12 +56,12 @@ pub trait LocalReplay: Send + Sync {
     ) -> Result<usize>;
     async fn iter(
         &self,
-        prefix_hint: Option<Vec<u8>>,
-        left_bound: Bound<Vec<u8>>,
-        right_bound: Bound<Vec<u8>>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
-        table_id: u32,
+        prefix_hint: Option<Vec<u8>>,
+        check_bloom_filter: bool,
         retention_seconds: Option<u32>,
+        table_id: u32,
     ) -> Result<Box<dyn ReplayIter>>;
 }
 
@@ -239,25 +239,25 @@ async fn handle_record(
                 assert_eq!(actual.ok(), expected, "ingest result wrong");
             }
         }
-        Operation::Iter(
+        Operation::Iter {
             prefix_hint,
-            left_bound,
-            right_bound,
+            key_range,
             epoch,
             table_id,
             retention_seconds,
-        ) => {
+            check_bloom_filter,
+        } => {
             let local_storage = local_storages
                 .entry(table_id)
                 .or_insert(replay.new_local(table_id).await);
             let iter = local_storage
                 .iter(
-                    prefix_hint,
-                    left_bound,
-                    right_bound,
+                    key_range,
                     epoch,
-                    table_id,
+                    prefix_hint,
+                    check_bloom_filter,
                     retention_seconds,
+                    table_id,
                 )
                 .await;
             let res = res_rx.recv().await.expect("recv result failed");

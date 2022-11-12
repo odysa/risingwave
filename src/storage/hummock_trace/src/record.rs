@@ -96,14 +96,14 @@ pub enum Operation {
 
     /// Iter operation of Hummock
     /// (prefix_hint, left_bound, right_bound, epoch, table_id, retention_seconds)
-    Iter(
-        Option<TraceKey>,
-        Bound<TraceKey>,
-        Bound<TraceKey>,
-        u64,
-        u32,
-        Option<u32>,
-    ),
+    Iter {
+        key_range: (Bound<TraceKey>, Bound<TraceValue>),
+        epoch: u64,
+        prefix_hint: Option<TraceKey>,
+        check_bloom_filter: bool,
+        retention_seconds: Option<u32>,
+        table_id: TableId,
+    },
 
     /// Iter.next operation
     /// (record_id, kv_pair)

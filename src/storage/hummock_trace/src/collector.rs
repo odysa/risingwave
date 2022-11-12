@@ -217,7 +217,7 @@ pub type RecordMsg = Either<Record, ()>;
 pub type WriteMsg = Either<Vec<Record>, ()>;
 
 #[derive(Clone, Copy)]
-pub enum StorageType{
+pub enum StorageType {
     Global,
     Local,
 }
