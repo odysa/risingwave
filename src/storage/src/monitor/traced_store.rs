@@ -40,29 +40,30 @@ impl<S> TracedStateStore<S> {
     pub fn new(inner: S, storage_type: StorageType) -> Self {
         init_collector();
         Self {
-            inner,
+            inner: inner,
             storage_type,
         }
-    }
-
-    pub fn inner(&self) -> &S {
-        &self.inner
     }
 }
 
 impl<S: StateStoreRead> TracedStateStore<S> {
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+
     async fn traced_iter<'a, I>(
         &self,
-        inner: I,
+        iter: I,
         record_id: RecordId,
-    ) -> StorageResult<<TracedStateStore<S> as StateStoreRead>::Iter>
+    ) -> StorageResult<TracedStateStoreIter<S::Iter>>
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
-        println!("traced iter");
-        let inner = inner.await?;
-        let traced = TracedStateStoreIter { inner, record_id };
-        println!("traced iter fn");
+        let iter = iter.await?;
+        let traced = TracedStateStoreIter {
+            inner: iter,
+            record_id,
+        };
         Ok(traced)
     }
 }
@@ -70,7 +71,7 @@ impl<S: StateStoreRead> TracedStateStore<S> {
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {}
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
-    type Local = TracedStateStore<S::Local>;
+    type Local = S::Local;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -85,20 +86,16 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            println!("sync");
             let span = trace!(SYNC, epoch);
             let sync_result = self.inner.sync(epoch).await;
             trace_result!(SYNC, span, sync_result);
-            println!("sync fin");
             sync_result
         }
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        println!("seal");
         trace!(SEAL, epoch, is_checkpoint);
         self.inner.seal_epoch(epoch, is_checkpoint);
-        println!("seal fin");
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
@@ -106,7 +103,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     }
 
     fn new_local(&self, table_id: risingwave_common::catalog::TableId) -> Self::NewLocalFuture<'_> {
-        async move { TracedStateStore::new(self.inner.new_local(table_id).await, StorageType::Local) }
+        self.inner.new_local(table_id)
     }
 }
 
@@ -122,11 +119,9 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            println!("get");
             let span: TraceSpan = trace!(GET, key, epoch, read_options);
             let res: StorageResult<Option<Bytes>> = self.inner.get(key, epoch, read_options).await;
             trace_result!(GET, span, res);
-            println!("get fin");
             res
         }
     }
@@ -138,13 +133,11 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         async move {
-            println!("trace_store iter {:?}", key_range);
-            let span = trace!(ITER, key_range, epoch, read_options);
+            let span: TraceSpan = trace!(ITER, key_range, epoch, read_options);
             let iter = self
                 .traced_iter(self.inner.iter(key_range, epoch, read_options), span.id())
                 .await;
             trace_result!(ITER, span, iter);
-            println!("trace_store iter fin");
             iter
         }
     }
@@ -160,14 +153,12 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            println!("ingest");
             let span: TraceSpan = trace!(INGEST, kv_pairs, delete_ranges, write_options);
             let res: StorageResult<usize> = self
                 .inner
                 .ingest_batch(kv_pairs, delete_ranges, write_options)
                 .await;
             trace_result!(INGEST, span, res);
-            println!("ingest fin");
             res
         }
     }
@@ -194,16 +185,13 @@ where
 {
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
+    type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            println!("begin next");
             let span = trace!(ITER_NEXT, self.record_id);
-            let kv_pair = self.inner.next().await.expect("failed to call iter next");
+            let kv_pair = self.inner.next().await?;
             trace_result!(ITER_NEXT, span, kv_pair);
-            println!("fin next");
             Ok(kv_pair)
         }
     }

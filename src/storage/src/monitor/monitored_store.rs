@@ -58,6 +58,15 @@ impl<S> MonitoredStateStore<S> {
             stats,
         }
     }
+
+    fn new_local(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
+        #[cfg(hm_trace)]
+        let inner = TracedStateStore::new(inner, StorageType::Local);
+        Self {
+            inner: Box::new(inner),
+            stats,
+        }
+    }
 }
 #[cfg(not(hm_trace))]
 type MonitoredIterInnerType<I> = I;
@@ -149,7 +158,6 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        println!("begin monitored iter");
         self.monitored_iter(self.inner.iter(key_range, epoch, read_options))
     }
 }
@@ -185,10 +193,7 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
-    #[cfg(not(hm_trace))]
     type Local = MonitoredStateStore<S::Local>;
-    #[cfg(hm_trace)]
-    type Local = MonitoredStateStore<TracedStateStore<S::Local>>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -244,7 +249,9 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { MonitoredStateStore::new(self.inner.new_local(table_id).await, self.stats.clone()) }
+        async move {
+            MonitoredStateStore::new_local(self.inner.new_local(table_id).await, self.stats.clone())
+        }
     }
 }
 

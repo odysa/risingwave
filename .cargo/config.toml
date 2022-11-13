@@ -39,3 +39,6 @@ rustflags = [
     "-Wnonstandard_style",
     "-Wrust_2018_idioms",
 ]
+
+[build]
+rustc-wrapper = "/home/odysa/.cargo/bin/sccache"

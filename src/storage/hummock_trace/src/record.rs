@@ -123,7 +123,6 @@ pub enum Operation {
     /// The end of an operation
     Finish,
 
-    /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
     MetaMessage(Box<TraceSubResp>),
 
     Result(OperationResult),

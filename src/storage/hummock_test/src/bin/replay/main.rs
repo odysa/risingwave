@@ -21,9 +21,7 @@ use std::sync::Arc;
 use clap::Parser;
 use replay_impl::HummockInterface;
 use risingwave_common::config::{load_config, StorageConfig};
-use risingwave_hummock_test::test_utils::{
-    get_replay_notification_client, HummockV2MixedStateStore,
-};
+use risingwave_hummock_test::test_utils::get_replay_notification_client;
 use risingwave_hummock_trace::{
     HummockReplay, Operation, Record, Replayable, Result, TraceReader, TraceReaderImpl,
 };

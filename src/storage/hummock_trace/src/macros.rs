@@ -95,13 +95,12 @@ macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
         let res: Option<Option<Vec<u8>>> = $result
             .as_ref()
-            .map(Clone::clone)
-            .ok()
-            .map(|b| b.map(|c| c.to_vec()));
+            .map(|o| o.as_ref().map(|b| b.to_vec()))
+            .ok();
         $span.send($crate::record::Operation::Result(OperationResult::Get(res)));
     };
     (INGEST, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(Clone::clone).ok();
+        let res = $result.as_ref().map(|b| *b).ok();
         $span.send($crate::record::Operation::Result(OperationResult::Ingest(
             res,
         )));
