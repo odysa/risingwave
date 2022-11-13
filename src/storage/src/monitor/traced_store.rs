@@ -16,6 +16,8 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use futures::Future;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, trace, trace_result, OperationResult, RecordId, StorageType, TraceSpan,
 };
@@ -42,6 +44,13 @@ impl<S> TracedStateStore<S> {
         Self {
             inner: inner,
             storage_type,
+        }
+    }
+
+    pub fn new_local(inner: S) -> Self {
+        Self {
+            inner: inner,
+            storage_type: StorageType::Local,
         }
     }
 }
@@ -77,16 +86,13 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 
     define_state_store_associated_type!();
 
-    fn try_wait_epoch(
-        &self,
-        epoch: risingwave_hummock_sdk::HummockReadEpoch,
-    ) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move { self.inner.try_wait_epoch(epoch).await }
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            let span = trace!(SYNC, epoch);
+            let span = trace!(SYNC, epoch, self.storage_type);
             let sync_result = self.inner.sync(epoch).await;
             trace_result!(SYNC, span, sync_result);
             sync_result
@@ -94,7 +100,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        trace!(SEAL, epoch, is_checkpoint);
+        trace!(SEAL, epoch, is_checkpoint, self.storage_type);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
@@ -102,7 +108,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         async move { self.inner.clear_shared_buffer().await }
     }
 
-    fn new_local(&self, table_id: risingwave_common::catalog::TableId) -> Self::NewLocalFuture<'_> {
+    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
         self.inner.new_local(table_id)
     }
 }
@@ -119,7 +125,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            let span: TraceSpan = trace!(GET, key, epoch, read_options);
+            let span: TraceSpan = trace!(GET, key, epoch, read_options, self.storage_type);
             let res: StorageResult<Option<Bytes>> = self.inner.get(key, epoch, read_options).await;
             trace_result!(GET, span, res);
             res
@@ -133,7 +139,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         async move {
-            let span: TraceSpan = trace!(ITER, key_range, epoch, read_options);
+            let span: TraceSpan = trace!(ITER, key_range, epoch, read_options, self.storage_type);
             let iter = self
                 .traced_iter(self.inner.iter(key_range, epoch, read_options), span.id())
                 .await;
@@ -153,7 +159,13 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            let span: TraceSpan = trace!(INGEST, kv_pairs, delete_ranges, write_options);
+            let span: TraceSpan = trace!(
+                INGEST,
+                kv_pairs,
+                delete_ranges,
+                write_options,
+                self.storage_type
+            );
             let res: StorageResult<usize> = self
                 .inner
                 .ingest_batch(kv_pairs, delete_ranges, write_options)

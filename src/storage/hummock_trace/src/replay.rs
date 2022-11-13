@@ -193,7 +193,7 @@ async fn handle_record(
     iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
     local_storages: &mut HashMap<u32, Box<dyn LocalReplay>>,
 ) {
-    let Record(_, record_id, op) = record;
+    let Record(_, _, record_id, op) = record;
     match op {
         Operation::Get {
             key,

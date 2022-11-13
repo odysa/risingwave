@@ -61,7 +61,7 @@ impl<S> MonitoredStateStore<S> {
 
     fn new_local(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         #[cfg(hm_trace)]
-        let inner = TracedStateStore::new(inner, StorageType::Local);
+        let inner = TracedStateStore::new_local(inner);
         Self {
             inner: Box::new(inner),
             stats,
