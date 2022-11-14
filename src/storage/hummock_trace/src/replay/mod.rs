@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod replay;
+mod replay_runner;
 mod worker;
 
 use std::ops::Bound;
 
 #[cfg(test)]
 use mockall::automock;
-pub use replay::*;
+pub use replay_runner::*;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 pub(crate) use worker::*;
 

@@ -164,7 +164,7 @@ mod tests {
         let table_id1 = 1;
         let table_id2 = 2;
         let table_id3 = 3;
-        let actor_1: Vec<Result<Record>> = vec![
+        let actor_1 = vec![
             (
                 0,
                 Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id1),
@@ -185,10 +185,9 @@ mod tests {
             (3, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id1, record_id, op)))
-        .collect();
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id1, record_id, op)));
 
-        let actor_2: Vec<Result<Record>> = vec![
+        let actor_2 = vec![
             (
                 1,
                 Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id2),
@@ -209,10 +208,9 @@ mod tests {
             (2, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id2, record_id, op)))
-        .collect();
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id2, record_id, op)));
 
-        let actor_3: Vec<Result<Record>> = vec![
+        let actor_3 = vec![
             (
                 4,
                 Operation::get(vec![0, 1, 2, 3], 123, None, true, Some(12), table_id3),
@@ -233,8 +231,7 @@ mod tests {
             (5, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id3, record_id, op)))
-        .collect();
+        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id3, record_id, op)));
 
         let mut non_local: Vec<Result<Record>> = vec![
             (6, Operation::Seal(seal_id, seal_checkpoint)),

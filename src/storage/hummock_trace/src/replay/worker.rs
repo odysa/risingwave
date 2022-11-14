@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -70,10 +71,11 @@ async fn handle_record(
             let local_storage = {
                 // cannot use or_insert here because rust evaluates arguments even though
                 // or_insert is never called
-                if !local_storages.contains_key(&table_id) {
-                    local_storages.insert(table_id, replay.new_local(table_id).await);
+                if let Entry::Vacant(e) = local_storages.entry(table_id) {
+                    e.insert(replay.new_local(table_id).await)
+                } else {
+                    local_storages.get(&table_id).unwrap()
                 }
-                local_storages.get(&table_id).unwrap()
             };
 
             let actual = local_storage
@@ -98,10 +100,11 @@ async fn handle_record(
             delete_ranges,
         } => {
             let local_storage = {
-                if !local_storages.contains_key(&table_id) {
-                    local_storages.insert(table_id, replay.new_local(table_id).await);
+                if let Entry::Vacant(e) = local_storages.entry(table_id) {
+                    e.insert(replay.new_local(table_id).await)
+                } else {
+                    local_storages.get(&table_id).unwrap()
                 }
-                local_storages.get(&table_id).unwrap()
             };
 
             let actual = local_storage
@@ -122,10 +125,11 @@ async fn handle_record(
             check_bloom_filter,
         } => {
             let local_storage = {
-                if !local_storages.contains_key(&table_id) {
-                    local_storages.insert(table_id, replay.new_local(table_id).await);
+                if let Entry::Vacant(e) = local_storages.entry(table_id) {
+                    e.insert(replay.new_local(table_id).await)
+                } else {
+                    local_storages.get(&table_id).unwrap()
                 }
-                local_storages.get(&table_id).unwrap()
             };
 
             let iter = local_storage
