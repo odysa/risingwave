@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -159,5 +173,135 @@ async fn handle_record(
             }
         }
         _ => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Bound;
+
+    use mockall::predicate;
+    use risingwave_common::hm_trace::TraceLocalId;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    use super::*;
+    use crate::{MockLocalReplay, MockReplayIter, MockReplayable, StorageType};
+
+    #[tokio::test]
+    async fn test_handle_record() {
+        let mut iters_map = HashMap::new();
+        let mut local_storages = HashMap::new();
+        let (res_tx, mut res_rx) = unbounded_channel();
+
+        let op = Operation::Get {
+            key: vec![123],
+            epoch: 123,
+            prefix_hint: None,
+            check_bloom_filter: false,
+            retention_seconds: Some(12),
+            table_id: 12,
+        };
+        let record = Record::new(StorageType::Local, TraceLocalId::Actor(0), 0, op);
+        let mut mock_replay = MockReplayable::new();
+
+        mock_replay.expect_new_local().times(1).returning(|_| {
+            let mut mock_local = MockLocalReplay::new();
+
+            mock_local
+                .expect_get()
+                .with(
+                    predicate::eq(vec![123]),
+                    predicate::eq(false),
+                    predicate::eq(123),
+                    predicate::eq(None),
+                    predicate::eq(12),
+                    predicate::eq(Some(12)),
+                )
+                .returning(|_, _, _, _, _, _| Ok(Some(vec![120])));
+
+            Box::new(mock_local)
+        });
+
+        mock_replay.expect_new_local().times(1).returning(|_| {
+            let mut mock_local = MockLocalReplay::new();
+
+            mock_local
+                .expect_iter()
+                .with(
+                    predicate::eq((Bound::Unbounded, Bound::Unbounded)),
+                    predicate::eq(45),
+                    predicate::eq(None),
+                    predicate::eq(false),
+                    predicate::eq(Some(12)),
+                    predicate::eq(500),
+                )
+                .returning(|_, _, _, _, _, _| {
+                    let mut mock_iter = MockReplayIter::new();
+                    mock_iter
+                        .expect_next()
+                        .times(1)
+                        .returning(|| Some((vec![1], vec![0])));
+                    Ok(Box::new(mock_iter))
+                });
+
+            Box::new(mock_local)
+        });
+
+        let replay: Arc<Box<dyn Replayable>> = Arc::new(Box::new(mock_replay));
+        res_tx
+            .send(OperationResult::Get(Some(Some(vec![120]))))
+            .unwrap();
+        handle_record(
+            record,
+            &replay,
+            &mut res_rx,
+            &mut iters_map,
+            &mut local_storages,
+        )
+        .await;
+
+        assert_eq!(local_storages.len(), 1);
+        assert!(iters_map.is_empty());
+
+        let op = Operation::Iter {
+            key_range: (Bound::Unbounded, Bound::Unbounded),
+            epoch: 45,
+            prefix_hint: None,
+            check_bloom_filter: false,
+            retention_seconds: Some(12),
+            table_id: 500,
+        };
+        let record = Record::new(StorageType::Local, TraceLocalId::Actor(0), 1, op);
+        res_tx.send(OperationResult::Iter(Some(()))).unwrap();
+
+        handle_record(
+            record,
+            &replay,
+            &mut res_rx,
+            &mut iters_map,
+            &mut local_storages,
+        )
+        .await;
+
+        assert_eq!(local_storages.len(), 2);
+        assert_eq!(iters_map.len(), 1);
+
+        let op = Operation::IterNext(1);
+        let record = Record::new(StorageType::Local, TraceLocalId::Actor(0), 2, op);
+        res_tx
+            .send(OperationResult::IterNext(Some((vec![1], vec![0]))))
+            .unwrap();
+
+        handle_record(
+            record,
+            &replay,
+            &mut res_rx,
+            &mut iters_map,
+            &mut local_storages,
+        )
+        .await;
+
+        assert_eq!(local_storages.len(), 2);
+        assert_eq!(iters_map.len(), 1);
     }
 }
