@@ -362,7 +362,7 @@ where
 }
 
 impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
-    pub async fn new(state_store: G) -> Self {
+    pub(crate) async fn new(state_store: G) -> Self {
         LocalGlobalStateStoreHolder {
             local: state_store.new_local(TEST_TABLE_ID).await,
             global: state_store,
