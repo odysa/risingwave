@@ -45,8 +45,8 @@ impl Record {
         Self(storage_type, record_id, op)
     }
 
-    pub fn storage_type(&self) -> StorageType {
-        self.0
+    pub fn storage_type(&self) -> &StorageType {
+        &self.0
     }
 
     pub fn record_id(&self) -> RecordId {

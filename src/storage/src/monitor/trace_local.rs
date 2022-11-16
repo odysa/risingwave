@@ -18,8 +18,7 @@ pub fn hummock_trace_scope<F: Future>(f: F) -> TaskLocalFuture<ConcurrentId, F> 
     #[cfg(all(not(madsim), hm_trace))]
     {
         let id = CONCURRENT_ID.fetch_add(1, Ordering::Relaxed);
-        println!("id scoped {:?}", id);
-        LOCAL_ID.scope(Some(id), f)
+        LOCAL_ID.scope(id, f)
     }
     #[cfg(any(madsim, not(hm_trace)))]
     f

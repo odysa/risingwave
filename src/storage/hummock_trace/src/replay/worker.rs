@@ -13,13 +13,139 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::task::JoinHandle;
 
-use super::{ReplayRequest, WorkerResponse};
-use crate::{LocalReplay, Operation, OperationResult, Record, RecordId, ReplayIter, Replayable};
+use super::{ReplayRequest, WorkerId, WorkerResponse};
+use crate::{
+    LocalReplay, Operation, OperationResult, Record, RecordId, ReplayIter, Replayable, StorageType,
+};
+
+pub(crate) struct WorkerScheduler {
+    workers: HashMap<WorkerId, WorkerHandler>,
+    non_actor_task_ids: HashSet<RecordId>,
+}
+
+impl WorkerScheduler {
+    pub(crate) fn new() -> Self {
+        WorkerScheduler {
+            workers: HashMap::new(),
+            non_actor_task_ids: HashSet::new(),
+        }
+    }
+
+    pub(crate) fn schedule(&mut self, record: Record, replay: Arc<Box<dyn Replayable>>) {
+        println!("sc {:?}", record);
+        let worker_id = self.allocate_worker_id(&record);
+
+        let handler = self.workers.entry(worker_id.clone()).or_insert_with(|| {
+            let (req_tx, req_rx) = unbounded_channel();
+            let (resp_tx, resp_rx) = unbounded_channel();
+            let (res_tx, res_rx) = unbounded_channel();
+            let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, replay));
+            WorkerHandler {
+                req_tx,
+                res_tx,
+                resp_rx,
+                join,
+            }
+        });
+
+        handler.send_replay_req(ReplayRequest::Task(vec![record]));
+    }
+
+    pub(crate) fn send_result(&mut self, record: &Record, trace_result: OperationResult) {
+        let worker_id = self.allocate_worker_id(record);
+        if let Some(handler) = self.workers.get_mut(&worker_id) {
+            handler.send_result(trace_result);
+        }
+    }
+
+    pub(crate) async fn wait_finish(&mut self, record: &Record) {
+        let worker_id = self.allocate_worker_id(record);
+        if let Some(handler) = self.workers.get_mut(&worker_id) {
+            handler.wait_resp().await;
+
+            if let WorkerId::NonActor(_) = worker_id {
+                handler.finish();
+                self.workers.remove(&worker_id);
+            }
+        }
+    }
+
+    pub(crate) async fn shutdown(self) {
+        for handler in self.workers.into_values() {
+            handler.finish();
+            handler.join().await;
+        }
+    }
+
+    fn allocate_worker_id(&mut self, record: &Record) -> WorkerId {
+        match record.storage_type() {
+            StorageType::Local(id) => WorkerId::Local(*id),
+            StorageType::Global => match record.op() {
+                Operation::Sync(_) | Operation::Seal(_, _) | Operation::MetaMessage(_) => {
+                    self.non_actor_task_ids.insert(record.record_id());
+                    WorkerId::NonActor(record.record_id())
+                }
+                Operation::Result(_) => self.allocate_non_actor(&record),
+                Operation::Finish => {
+                    let id = self.allocate_non_actor(&record);
+                    if let WorkerId::NonActor(_) = id {
+                        self.non_actor_task_ids.remove(&record.record_id());
+                    }
+                    id
+                }
+                _ => WorkerId::Global,
+            },
+        }
+    }
+
+    fn allocate_non_actor(&self, record: &Record) -> WorkerId {
+        if self.non_actor_task_ids.contains(&record.record_id()) {
+            WorkerId::NonActor(record.record_id())
+        } else {
+            WorkerId::Global
+        }
+    }
+}
+
+struct WorkerHandler {
+    req_tx: UnboundedSender<ReplayRequest>,
+    res_tx: UnboundedSender<OperationResult>,
+    resp_rx: UnboundedReceiver<WorkerResponse>,
+    join: JoinHandle<()>,
+}
+
+impl WorkerHandler {
+    async fn join(self) {
+        self.join.await.expect("failed to stop worker");
+    }
+
+    fn finish(&self) {
+        self.send_replay_req(ReplayRequest::Fin);
+    }
+
+    fn send_replay_req(&self, req: ReplayRequest) {
+        self.req_tx
+            .send(req)
+            .expect("failed to send replay request");
+    }
+
+    fn send_result(&self, result: OperationResult) {
+        self.res_tx.send(result).expect("failed to send result");
+    }
+
+    async fn wait_resp(&mut self) {
+        self.resp_rx
+            .recv()
+            .await
+            .expect("failed to wait worker resp");
+    }
+}
 
 pub(crate) async fn replay_worker(
     mut rx: UnboundedReceiver<ReplayRequest>,
@@ -69,8 +195,6 @@ async fn handle_record(
             prefix_hint,
         } => {
             let local_storage = {
-                // cannot use or_insert here because rust evaluates arguments even though
-                // or_insert is never called
                 if let Entry::Vacant(e) = local_storages.entry(table_id) {
                     e.insert(replay.new_local(table_id).await)
                 } else {
@@ -204,7 +328,7 @@ mod tests {
             retention_seconds: Some(12),
             table_id: 12,
         };
-        let record = Record::new(StorageType::Local(Some(0)), 0, op);
+        let record = Record::new(StorageType::Local(0), 0, op);
         let mut mock_replay = MockReplayable::new();
 
         mock_replay.expect_new_local().times(1).returning(|_| {
@@ -274,7 +398,7 @@ mod tests {
             retention_seconds: Some(12),
             table_id: 500,
         };
-        let record = Record::new(StorageType::Local(Some(0)), 1, op);
+        let record = Record::new(StorageType::Local(0), 1, op);
         res_tx.send(OperationResult::Iter(Some(()))).unwrap();
 
         handle_record(
@@ -290,7 +414,7 @@ mod tests {
         assert_eq!(iters_map.len(), 1);
 
         let op = Operation::IterNext(1);
-        let record = Record::new(StorageType::Local(Some(0)), 2, op);
+        let record = Record::new(StorageType::Local(0), 2, op);
         res_tx
             .send(OperationResult::IterNext(Some((vec![1], vec![0]))))
             .unwrap();

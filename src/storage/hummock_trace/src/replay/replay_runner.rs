@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::task::JoinHandle;
-
-use super::{ReplayRequest, WorkerId, WorkerResponse};
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{replay_worker, Operation, OperationResult, RecordId, Replayable, StorageType};
+use crate::{Operation, Replayable, WorkerScheduler};
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
@@ -37,44 +32,19 @@ impl<R: TraceReader> HummockReplay<R> {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        let mut workers: HashMap<WorkerId, WorkerHandler> = HashMap::new();
+        let mut worker_scheduler = WorkerScheduler::new();
         let mut total_ops: u64 = 0;
-        while let Ok(r) = self.reader.read() {
-            let record_id = r.record_id();
-            let storage_type = r.storage_type();
-            let worker_id = self.allocate_worker_id(&storage_type, record_id);
 
+        while let Ok(r) = self.reader.read() {
             match r.op() {
                 Operation::Result(trace_result) => {
-                    if let Some(handler) = workers.get_mut(&worker_id) {
-                        handler.send_result(trace_result.to_owned());
-                    }
+                    worker_scheduler.send_result(&r, trace_result.to_owned());
                 }
                 Operation::Finish => {
-                    if let Some(handler) = workers.get_mut(&worker_id) {
-                        handler.wait_resp().await;
-                        if let StorageType::Local(None) = storage_type {
-                            handler.finish();
-                            workers.remove(&worker_id);
-                        }
-                    }
+                    worker_scheduler.wait_finish(&r).await;
                 }
                 _ => {
-                    let handler = workers.entry(worker_id.clone()).or_insert_with(|| {
-                        let (req_tx, req_rx) = unbounded_channel();
-                        let (resp_tx, resp_rx) = unbounded_channel();
-                        let (res_tx, res_rx) = unbounded_channel();
-                        let replay = self.replay.clone();
-                        let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, replay));
-                        WorkerHandler {
-                            req_tx,
-                            res_tx,
-                            resp_rx,
-                            join,
-                        }
-                    });
-
-                    handler.send_replay_req(ReplayRequest::Task(vec![r]));
+                    worker_scheduler.schedule(r, self.replay.clone());
                     total_ops += 1;
                     if total_ops % 10000 == 0 {
                         println!("replayed {} ops", total_ops);
@@ -83,56 +53,10 @@ impl<R: TraceReader> HummockReplay<R> {
             };
         }
 
-        for handler in workers.into_values() {
-            handler.finish();
-            handler.join().await;
-        }
+        worker_scheduler.shutdown().await;
+
         println!("replay finished, totally {} operations", total_ops);
         Ok(())
-    }
-
-    fn allocate_worker_id(&self, storage_type: &StorageType, record_id: RecordId) -> WorkerId {
-        match storage_type {
-            StorageType::Global => WorkerId::Actor(0),
-            StorageType::Local(id) => match id {
-                Some(id) => WorkerId::Actor(*id),
-                None => WorkerId::None(record_id),
-            },
-        }
-    }
-}
-
-struct WorkerHandler {
-    req_tx: UnboundedSender<ReplayRequest>,
-    res_tx: UnboundedSender<OperationResult>,
-    resp_rx: UnboundedReceiver<WorkerResponse>,
-    join: JoinHandle<()>,
-}
-
-impl WorkerHandler {
-    async fn join(self) {
-        self.join.await.expect("failed to stop worker");
-    }
-
-    fn finish(&self) {
-        self.send_replay_req(ReplayRequest::Fin);
-    }
-
-    fn send_replay_req(&self, req: ReplayRequest) {
-        self.req_tx
-            .send(req)
-            .expect("failed to send replay request");
-    }
-
-    fn send_result(&self, result: OperationResult) {
-        self.res_tx.send(result).expect("failed to send result");
-    }
-
-    async fn wait_resp(&mut self) {
-        self.resp_rx
-            .recv()
-            .await
-            .expect("failed to wait worker resp");
     }
 }
 
@@ -145,7 +69,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        MockLocalReplay, MockReplayable, MockTraceReader, Record, StorageType, TraceError,
+        MockLocalReplay, MockReplayable, MockTraceReader, OperationResult, Record, StorageType,
+        TraceError,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -157,7 +82,7 @@ mod tests {
         let sync_id = 4561245432;
         let seal_id = 5734875243;
 
-        let storage_type = StorageType::Local(Some(0));
+        let storage_type = StorageType::Local(0);
         let table_id1 = 1;
         let table_id2 = 2;
         let table_id3 = 3;

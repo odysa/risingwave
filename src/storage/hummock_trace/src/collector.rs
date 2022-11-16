@@ -225,7 +225,7 @@ impl Drop for TraceSpan {
 pub type RecordMsg = Either<Record, ()>;
 pub type WriteMsg = Either<Vec<Record>, ()>;
 
-pub type ConcurrentId = Option<u64>;
+pub type ConcurrentId = u64;
 
 #[derive(Clone, Copy, Debug, Encode, Decode, PartialEq, Eq)]
 pub enum StorageType {
@@ -328,12 +328,8 @@ mod tests {
             let collector = collector.clone();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span = TraceSpan::new_op(
-                    collector.tx(),
-                    generator.next(),
-                    op,
-                    StorageType::Local(Some(0)),
-                );
+                let _span =
+                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Local(0));
             });
             handles.push(handle);
         }

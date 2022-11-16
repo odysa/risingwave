@@ -595,15 +595,14 @@ impl LocalStreamManagerCore {
                 .transpose()
                 .context("failed to decode vnode bitmap")?;
 
-            let (executor, subtasks) = self
-                .create_nodes(
-                    actor.fragment_id,
-                    actor.get_nodes()?,
-                    env.clone(),
-                    &actor_context,
-                    vnode_bitmap,
-                )
-                .await?;
+            let (executor, subtasks) = hummock_trace_scope(self.create_nodes(
+                actor.fragment_id,
+                actor.get_nodes()?,
+                env.clone(),
+                &actor_context,
+                vnode_bitmap,
+            ))
+            .await?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(
@@ -621,12 +620,12 @@ impl LocalStreamManagerCore {
                 .map(|(m, _)| m.register(actor_id));
 
             let handle = {
-                let actor = hummock_trace_scope(async move {
+                let actor = async move {
                     let _ = actor.run().await.inspect_err(|err| {
                         // TODO: check error type and panic if it's unexpected.
                         tracing::error!(actor=%actor_id, error=%err, "actor exit");
                     });
-                });
+                };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {
                     Some(trace_reporter) => trace_reporter.trace(

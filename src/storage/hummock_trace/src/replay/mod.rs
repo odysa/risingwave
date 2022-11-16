@@ -37,9 +37,10 @@ pub(crate) enum ReplayRequest {
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
-enum WorkerId {
-    Actor(u64),
-    None(u64),
+pub(crate) enum WorkerId {
+    Local(u64),
+    Global,
+    NonActor(u64),
 }
 
 #[cfg_attr(test, automock)]

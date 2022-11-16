@@ -56,10 +56,10 @@ macro_rules! trace {
             $storage_type,
         );
     };
-    (ITER_NEXT, $id:expr) => {
+    (ITER_NEXT, $id:expr, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::IterNext($id),
-            $crate::collector::StorageType::Local(Some(0)),
+            $storage_type,
         );
     };
     (SYNC, $epoch:ident, $storage_type:expr) => {
