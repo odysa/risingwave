@@ -30,13 +30,13 @@ lazy_static! {
     static ref GLOBAL_RECORD_ID: RecordIdGenerator = RecordIdGenerator::new();
 }
 
-const LOG_PATH: &str = "HM_TRACE_PATH";
+const LOG_PATH_VAR: &str = "HM_TRACE_PATH";
 const DEFAULT_PATH: &str = ".trace/hummock.ht";
 const WRITER_BUFFER_SIZE: usize = 1024;
 
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
-    let path = match env::var(LOG_PATH) {
+    let path = match env::var(LOG_PATH_VAR) {
         Ok(p) => p,
         Err(_) => DEFAULT_PATH.to_string(),
     };

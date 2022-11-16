@@ -27,7 +27,7 @@ pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 mod trace_local;
 pub use trace_local::*;
 
-#[cfg(hm_trace)]
+#[cfg(feature = "hm-trace")]
 mod traced_store;
-#[cfg(hm_trace)]
+#[cfg(feature = "hm-trace")]
 pub use traced_store::*;

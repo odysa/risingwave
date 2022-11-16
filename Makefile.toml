@@ -38,7 +38,8 @@ end
 
 # enable hummock tracing
 if ${is_hm_trace_enabled}
-   set_env RUSTFLAGS "--cfg tokio_unstable --cfg hm_trace"
+  echo "env set"
+  set_env CARGO_FEATURE_HM_TRACE 1
 end
 ''',
 ]

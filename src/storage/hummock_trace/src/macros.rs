@@ -77,7 +77,7 @@ macro_rules! trace {
     (VERSION) => {
         let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::UpdateVersion(),
-            risingwave_common::hm_trace::TraceLocalId::None,
+            risingwave_common::hm - trace::TraceLocalId::None,
         );
     };
     (METAMSG, $resp:ident) => {

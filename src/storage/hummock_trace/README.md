@@ -7,13 +7,13 @@
 
 Put this env variable in `risedev-components.user.env`
 ```toml
-ENABLE_HM_TRACE=true
+ENABLE_hm_trace=true
 ```
-It makes `risingdev` put flag `hm_trace` in env variables.
+It makes `risingdev` put flag `hm-trace` in env variables.
 
 You can also config written log path
 ```toml
-HM_TRACE_PATH=".trace/hummock.ht"
+hm-trace_PATH=".trace/hummock.ht"
 ```
 
 Then running any risedev commands traces storage operations to the log file.
@@ -21,24 +21,24 @@ Then running any risedev commands traces storage operations to the log file.
 ### CLI
 If you wish to manually run `cargo` rather than `risedev`, set the env variable to enable tracing.
 ```
-RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable"
+RUSTFLAGS="--cfg hm-trace --cfg tokio_unstable"
 ```
 We must manually enable `tokio_unstable` because extra flag sources are mutually exclusive. If we provide this variable, cargo will not evaluate `build.rustflags` in `.cargo/config.toml`
 
 For example, to start a traced playground
 
 ```
-RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable" cargo run --bin risingwave playground
+RUSTFLAGS="--cfg hm-trace --cfg tokio_unstable" cargo run --bin risingwave playground
 ```
 
 ### Development
-It's recommended to add `--cfg hm_trace` flag to `.cargo/config.toml` for development.
+It's recommended to add `--cfg hm-trace` flag to `.cargo/config.toml` for development.
 Example:
 ```toml
 [target.'cfg(all())']
 rustflags = [
   "--cfg",
-  "hm_trace"
+  "hm-trace"
 ]
 ```
 

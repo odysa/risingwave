@@ -20,7 +20,7 @@ use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummoc
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
-#[cfg(hm_trace)]
+#[cfg(feature = "hm-trace")]
 use risingwave_hummock_trace::trace;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::pin_version_response;
@@ -46,7 +46,7 @@ impl ObserverState for HummockObserverNode {
             return;
         };
 
-        #[cfg(hm_trace)]
+        #[cfg(feature = "hm-trace")]
         trace!(METAMSG, resp);
 
         assert!(
@@ -81,7 +81,7 @@ impl ObserverState for HummockObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        #[cfg(hm_trace)]
+        #[cfg(feature = "hm-trace")]
         trace!(METAMSG, resp);
 
         match resp.info {

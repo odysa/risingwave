@@ -21,12 +21,12 @@ use futures::Future;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
-#[cfg(hm_trace)]
+#[cfg(feature = "hm-trace")]
 use risingwave_hummock_trace::StorageType;
 use tracing::error;
 
 use super::StateStoreMetrics;
-#[cfg(hm_trace)]
+#[cfg(feature = "hm-trace")]
 use super::{TracedStateStore, TracedStateStoreIter};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -41,10 +41,10 @@ use crate::{
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
-    #[cfg(not(hm_trace))]
+    #[cfg(not(feature = "hm-trace"))]
     inner: Box<S>,
 
-    #[cfg(hm_trace)]
+    #[cfg(feature = "hm-trace")]
     inner: Box<TracedStateStore<S>>,
 
     stats: Arc<StateStoreMetrics>,
@@ -52,7 +52,7 @@ pub struct MonitoredStateStore<S> {
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        #[cfg(hm_trace)]
+        #[cfg(feature = "hm-trace")]
         let inner = TracedStateStore::new(inner, StorageType::Global);
         Self {
             inner: Box::new(inner),
@@ -61,7 +61,7 @@ impl<S> MonitoredStateStore<S> {
     }
 
     fn new_local(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        #[cfg(hm_trace)]
+        #[cfg(feature = "hm-trace")]
         let inner = TracedStateStore::new_local(inner);
         Self {
             inner: Box::new(inner),
@@ -69,9 +69,9 @@ impl<S> MonitoredStateStore<S> {
         }
     }
 }
-#[cfg(not(hm_trace))]
+#[cfg(not(feature = "hm-trace"))]
 type MonitoredIterInnerType<I> = I;
-#[cfg(hm_trace)]
+#[cfg(feature = "hm-trace")]
 type MonitoredIterInnerType<I> = TracedStateStoreIter<I>;
 
 impl<S> MonitoredStateStore<S>
@@ -114,11 +114,11 @@ where
     }
 
     pub fn inner(&self) -> &S {
-        #[cfg(hm_trace)]
+        #[cfg(feature = "hm-trace")]
         {
             self.inner.inner()
         }
-        #[cfg(not(hm_trace))]
+        #[cfg(not(feature = "hm-trace"))]
         &self.inner
     }
 }
@@ -268,9 +268,9 @@ impl MonitoredStateStore<HummockStorage> {
 
 /// A state store iterator wrapper for monitoring metrics.
 pub struct MonitoredStateStoreIter<I> {
-    #[cfg(not(hm_trace))]
+    #[cfg(not(feature = "hm-trace"))]
     inner: I,
-    #[cfg(hm_trace)]
+    #[cfg(feature = "hm-trace")]
     inner: TracedStateStoreIter<I>,
     total_items: usize,
     total_size: usize,
