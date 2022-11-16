@@ -26,6 +26,7 @@ use risingwave_hummock_trace::{
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
+use crate::monitor::get_concurrent_id;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -51,7 +52,7 @@ impl<S> TracedStateStore<S> {
     pub fn new_local(inner: S) -> Self {
         Self {
             inner,
-            storage_type: StorageType::Local,
+            storage_type: StorageType::Local(None),
         }
     }
 }

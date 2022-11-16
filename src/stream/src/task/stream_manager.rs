@@ -30,6 +30,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
+use risingwave_storage::monitor::hummock_trace_scope;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -620,12 +621,12 @@ impl LocalStreamManagerCore {
                 .map(|(m, _)| m.register(actor_id));
 
             let handle = {
-                let actor = async move {
+                let actor = hummock_trace_scope(async move {
                     let _ = actor.run().await.inspect_err(|err| {
                         // TODO: check error type and panic if it's unexpected.
                         tracing::error!(actor=%actor_id, error=%err, "actor exit");
                     });
-                };
+                });
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {
                     Some(trace_reporter) => trace_reporter.trace(

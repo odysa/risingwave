@@ -15,14 +15,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::hm_trace::TraceLocalId;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use super::{ReplayRequest, WorkerId, WorkerResponse};
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{replay_worker, Operation, OperationResult, RecordId, Replayable};
+use crate::{replay_worker, Operation, OperationResult, RecordId, Replayable, StorageType};
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
@@ -41,10 +40,9 @@ impl<R: TraceReader> HummockReplay<R> {
         let mut workers: HashMap<WorkerId, WorkerHandler> = HashMap::new();
         let mut total_ops: u64 = 0;
         while let Ok(r) = self.reader.read() {
-            let local_id = r.local_id();
             let record_id = r.record_id();
-
-            let worker_id = self.allocate_worker_id(&local_id, record_id);
+            let storage_type = r.storage_type();
+            let worker_id = self.allocate_worker_id(&storage_type, record_id);
 
             match r.op() {
                 Operation::Result(trace_result) => {
@@ -55,7 +53,7 @@ impl<R: TraceReader> HummockReplay<R> {
                 Operation::Finish => {
                     if let Some(handler) = workers.get_mut(&worker_id) {
                         handler.wait_resp().await;
-                        if let TraceLocalId::None = local_id {
+                        if let StorageType::Local(None) = storage_type {
                             handler.finish();
                             workers.remove(&worker_id);
                         }
@@ -93,11 +91,13 @@ impl<R: TraceReader> HummockReplay<R> {
         Ok(())
     }
 
-    fn allocate_worker_id(&self, local_id: &TraceLocalId, record_id: RecordId) -> WorkerId {
-        match local_id {
-            TraceLocalId::Actor(id) => WorkerId::Actor(*id),
-            TraceLocalId::Executor(id) => WorkerId::Executor(*id),
-            TraceLocalId::None => WorkerId::None(record_id),
+    fn allocate_worker_id(&self, storage_type: &StorageType, record_id: RecordId) -> WorkerId {
+        match storage_type {
+            StorageType::Global => WorkerId::Actor(0),
+            StorageType::Local(id) => match id {
+                Some(id) => WorkerId::Actor(*id),
+                None => WorkerId::None(record_id),
+            },
         }
     }
 }
@@ -157,10 +157,7 @@ mod tests {
         let sync_id = 4561245432;
         let seal_id = 5734875243;
 
-        let storage_type = StorageType::Local;
-        let local_id1 = TraceLocalId::Actor(1);
-        let local_id2 = TraceLocalId::Actor(2);
-        let local_id3 = TraceLocalId::Executor(1);
+        let storage_type = StorageType::Local(Some(0));
         let table_id1 = 1;
         let table_id2 = 2;
         let table_id3 = 3;
@@ -185,7 +182,7 @@ mod tests {
             (3, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id1, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)));
 
         let actor_2 = vec![
             (
@@ -208,7 +205,7 @@ mod tests {
             (2, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id2, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)));
 
         let actor_3 = vec![
             (
@@ -231,7 +228,7 @@ mod tests {
             (5, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, local_id3, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)));
 
         let mut non_local: Vec<Result<Record>> = vec![
             (6, Operation::Seal(seal_id, seal_checkpoint)),
@@ -241,7 +238,7 @@ mod tests {
             (7, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, TraceLocalId::None, record_id, op)))
+        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)))
         .collect();
 
         // interleave vectors to simulate concurrency

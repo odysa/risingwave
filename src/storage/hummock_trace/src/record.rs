@@ -15,7 +15,6 @@ use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bincode::{BorrowDecode, Decode, Encode};
-use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::StorageType;
@@ -39,42 +38,28 @@ impl RecordIdGenerator {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
-pub struct Record(
-    pub StorageType,
-    #[bincode(with_serde)] pub TraceLocalId,
-    pub RecordId,
-    pub Operation,
-);
+pub struct Record(pub StorageType, pub RecordId, pub Operation);
 
 impl Record {
-    pub(crate) fn new(
-        storage_type: StorageType,
-        local_id: TraceLocalId,
-        record_id: RecordId,
-        op: Operation,
-    ) -> Self {
-        Self(storage_type, local_id, record_id, op)
+    pub(crate) fn new(storage_type: StorageType, record_id: RecordId, op: Operation) -> Self {
+        Self(storage_type, record_id, op)
     }
 
     pub fn storage_type(&self) -> StorageType {
         self.0
     }
 
-    pub fn local_id(&self) -> TraceLocalId {
+    pub fn record_id(&self) -> RecordId {
         self.1
     }
 
-    pub fn record_id(&self) -> RecordId {
-        self.2
-    }
-
     pub fn op(&self) -> &Operation {
-        &self.3
+        &self.2
     }
 
     #[cfg(test)]
     pub(crate) fn new_local_none(record_id: RecordId, op: Operation) -> Self {
-        Self::new(StorageType::Global, TraceLocalId::None, record_id, op)
+        Self::new(StorageType::Global, record_id, op)
     }
 }
 

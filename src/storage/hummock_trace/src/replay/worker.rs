@@ -58,7 +58,7 @@ async fn handle_record(
     iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
     local_storages: &mut HashMap<u32, Box<dyn LocalReplay>>,
 ) {
-    let Record(_, _, record_id, op) = record;
+    let Record(_, record_id, op) = record;
     match op {
         Operation::Get {
             key,
@@ -185,7 +185,6 @@ mod tests {
     use std::ops::Bound;
 
     use mockall::predicate;
-    use risingwave_common::hm_trace::TraceLocalId;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
@@ -205,7 +204,7 @@ mod tests {
             retention_seconds: Some(12),
             table_id: 12,
         };
-        let record = Record::new(StorageType::Local, TraceLocalId::Actor(0), 0, op);
+        let record = Record::new(StorageType::Local(Some(0)), 0, op);
         let mut mock_replay = MockReplayable::new();
 
         mock_replay.expect_new_local().times(1).returning(|_| {
@@ -275,7 +274,7 @@ mod tests {
             retention_seconds: Some(12),
             table_id: 500,
         };
-        let record = Record::new(StorageType::Local, TraceLocalId::Actor(0), 1, op);
+        let record = Record::new(StorageType::Local(Some(0)), 1, op);
         res_tx.send(OperationResult::Iter(Some(()))).unwrap();
 
         handle_record(
@@ -291,7 +290,7 @@ mod tests {
         assert_eq!(iters_map.len(), 1);
 
         let op = Operation::IterNext(1);
-        let record = Record::new(StorageType::Local, TraceLocalId::Actor(0), 2, op);
+        let record = Record::new(StorageType::Local(Some(0)), 2, op);
         res_tx
             .send(OperationResult::IterNext(Some((vec![1], vec![0]))))
             .unwrap();

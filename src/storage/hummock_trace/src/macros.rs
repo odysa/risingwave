@@ -24,7 +24,6 @@ macro_rules! trace {
                 $opt.retention_seconds,
                 $opt.table_id.table_id,
             ),
-            risingwave_common::hm_trace::task_local_get(),
             $storage_type,
         );
     };
@@ -41,7 +40,6 @@ macro_rules! trace {
                 $opt.epoch,
                 $opt.table_id.table_id,
             ),
-            risingwave_common::hm_trace::task_local_get(),
             $storage_type,
         );
     };
@@ -55,28 +53,24 @@ macro_rules! trace {
                 retention_seconds: $opt.retention_seconds,
                 check_bloom_filter: $opt.check_bloom_filter,
             },
-            risingwave_common::hm_trace::task_local_get(),
             $storage_type,
         );
     };
     (ITER_NEXT, $id:expr) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::IterNext($id),
-            risingwave_common::hm_trace::task_local_get(),
-            $crate::collector::StorageType::Local,
+            $crate::collector::StorageType::Local(Some(0)),
         );
     };
     (SYNC, $epoch:ident, $storage_type:expr) => {
         $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Sync($epoch),
-            risingwave_common::hm_trace::TraceLocalId::None,
             $storage_type,
         );
     };
     (SEAL, $epoch:ident, $check_point:ident, $storage_type:expr) => {
         let _span = $crate::collector::TraceSpan::new_to_global(
             $crate::record::Operation::Seal($epoch, $check_point),
-            risingwave_common::hm_trace::TraceLocalId::None,
             $storage_type,
         );
     };
@@ -91,7 +85,6 @@ macro_rules! trace {
             $crate::record::Operation::MetaMessage(Box::new($crate::record::TraceSubResp(
                 $resp.clone(),
             ))),
-            risingwave_common::hm_trace::TraceLocalId::None,
             $crate::collector::StorageType::Global,
         );
     };

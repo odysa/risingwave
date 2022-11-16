@@ -39,7 +39,6 @@ pub(crate) enum ReplayRequest {
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 enum WorkerId {
     Actor(u64),
-    Executor(u64),
     None(u64),
 }
 
