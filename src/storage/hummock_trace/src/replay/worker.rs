@@ -38,8 +38,8 @@ impl WorkerScheduler {
     }
 
     pub(crate) fn schedule(&mut self, record: Record, replay: Arc<Box<dyn Replayable>>) {
-        println!("sc {:?}", record);
         let worker_id = self.allocate_worker_id(&record);
+        println!("sc {:?},id {:?}", record, worker_id);
 
         let handler = self.workers.entry(worker_id.clone()).or_insert_with(|| {
             let (req_tx, req_rx) = unbounded_channel();
