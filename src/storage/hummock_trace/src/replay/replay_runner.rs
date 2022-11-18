@@ -69,8 +69,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        MockLocalReplay, MockReplayable, MockTraceReader, OperationResult, Record, StorageType,
-        TraceError,
+        MockReplayable, MockTraceReader, OperationResult, Record, StorageType, TraceError,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -186,7 +185,7 @@ mod tests {
         let mut mock_replay = MockReplayable::new();
 
         mock_replay.expect_new_local().times(3).returning(move |_| {
-            let mut mock_local = MockLocalReplay::new();
+            let mut mock_local = MockReplayable::new();
 
             mock_local
                 .expect_get()

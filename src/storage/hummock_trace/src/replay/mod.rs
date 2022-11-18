@@ -46,15 +46,6 @@ pub(crate) enum WorkerId {
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait Replayable: Send + Sync {
-    async fn sync(&self, id: u64) -> Result<usize>;
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
-    async fn new_local(&self, table_id: u32) -> Box<dyn LocalReplay>;
-}
-
-#[cfg_attr(test, automock)]
-#[async_trait::async_trait]
-pub trait LocalReplay: Send + Sync {
     async fn get(
         &self,
         key: Vec<u8>,
@@ -80,10 +71,60 @@ pub trait LocalReplay: Send + Sync {
         retention_seconds: Option<u32>,
         table_id: u32,
     ) -> Result<Box<dyn ReplayIter>>;
+    async fn sync(&self, id: u64) -> Result<usize>;
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
+    async fn new_local(&self, table_id: u32) -> Box<dyn Replayable>;
 }
+
+// #[cfg_attr(test, automock)]
+// #[async_trait::async_trait]
+// pub trait LocalReplay: Send + Sync {
+//     async fn get(
+//         &self,
+//         key: Vec<u8>,
+//         check_bloom_filter: bool,
+//         epoch: u64,
+//         prefix_hint: Option<Vec<u8>>,
+//         table_id: u32,
+//         retention_seconds: Option<u32>,
+//     ) -> Result<Option<Vec<u8>>>;
+//     async fn ingest(
+//         &self,
+//         kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+//         delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+//         epoch: u64,
+//         table_id: u32,
+//     ) -> Result<usize>;
+//     async fn iter(
+//         &self,
+//         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+//         epoch: u64,
+//         prefix_hint: Option<Vec<u8>>,
+//         check_bloom_filter: bool,
+//         retention_seconds: Option<u32>,
+//         table_id: u32,
+//     ) -> Result<Box<dyn ReplayIter>>;
+// }
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait ReplayIter: Send + Sync {
     async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)>;
+}
+
+#[macro_export]
+macro_rules! dispatch_replay {
+    ($storage_type:ident, $replay:ident, $local_storages:ident, $table_id:ident) => {
+        match $storage_type {
+            StorageType::Global => $replay,
+            StorageType::Local(_) => {
+                if let Entry::Vacant(e) = $local_storages.entry($table_id) {
+                    e.insert($replay.new_local($table_id).await)
+                } else {
+                    $local_storages.get(&$table_id).unwrap()
+                }
+            }
+        }
+    };
 }

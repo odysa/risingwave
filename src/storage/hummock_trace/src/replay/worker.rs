@@ -21,7 +21,8 @@ use tokio::task::JoinHandle;
 
 use super::{ReplayRequest, WorkerId, WorkerResponse};
 use crate::{
-    LocalReplay, Operation, OperationResult, Record, RecordId, ReplayIter, Replayable, StorageType,
+    dispatch_replay, Operation, OperationResult, Record, RecordId, ReplayIter, Replayable,
+    StorageType,
 };
 
 pub(crate) struct WorkerScheduler {
@@ -87,13 +88,15 @@ impl WorkerScheduler {
         match record.storage_type() {
             StorageType::Local(id) => WorkerId::Local(*id),
             StorageType::Global => match record.op() {
+                // These operations should run in non-actor
                 Operation::Sync(_) | Operation::Seal(_, _) | Operation::MetaMessage(_) => {
                     self.non_actor_task_ids.insert(record.record_id());
                     WorkerId::NonActor(record.record_id())
                 }
-                Operation::Result(_) => self.allocate_non_actor(&record),
+                Operation::Result(_) => self.dispatch_global_worker_id(&record),
                 Operation::Finish => {
-                    let id = self.allocate_non_actor(&record);
+                    let id = self.dispatch_global_worker_id(&record);
+                    // remove a non_actor handler
                     if let WorkerId::NonActor(_) = id {
                         self.non_actor_task_ids.remove(&record.record_id());
                     }
@@ -104,7 +107,7 @@ impl WorkerScheduler {
         }
     }
 
-    fn allocate_non_actor(&self, record: &Record) -> WorkerId {
+    fn dispatch_global_worker_id(&self, record: &Record) -> WorkerId {
         if self.non_actor_task_ids.contains(&record.record_id()) {
             WorkerId::NonActor(record.record_id())
         } else {
@@ -182,9 +185,9 @@ async fn handle_record(
     replay: &Arc<Box<dyn Replayable>>,
     res_rx: &mut UnboundedReceiver<OperationResult>,
     iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
-    local_storages: &mut HashMap<u32, Box<dyn LocalReplay>>,
+    local_storages: &mut HashMap<u32, Box<dyn Replayable>>,
 ) {
-    let Record(_, record_id, op) = record;
+    let Record(storage_type, record_id, op) = record;
     match op {
         Operation::Get {
             key,
@@ -194,15 +197,8 @@ async fn handle_record(
             retention_seconds,
             prefix_hint,
         } => {
-            let local_storage = {
-                if let Entry::Vacant(e) = local_storages.entry(table_id) {
-                    e.insert(replay.new_local(table_id).await)
-                } else {
-                    local_storages.get(&table_id).unwrap()
-                }
-            };
-
-            let actual = local_storage
+            let storage = dispatch_replay!(storage_type, replay, local_storages, table_id);
+            let actual = storage
                 .get(
                     key,
                     check_bloom_filter,
@@ -223,15 +219,8 @@ async fn handle_record(
             table_id,
             delete_ranges,
         } => {
-            let local_storage = {
-                if let Entry::Vacant(e) = local_storages.entry(table_id) {
-                    e.insert(replay.new_local(table_id).await)
-                } else {
-                    local_storages.get(&table_id).unwrap()
-                }
-            };
-
-            let actual = local_storage
+            let storage = dispatch_replay!(storage_type, replay, local_storages, table_id);
+            let actual = storage
                 .ingest(kv_pairs, delete_ranges, epoch, table_id)
                 .await;
 
@@ -248,15 +237,8 @@ async fn handle_record(
             retention_seconds,
             check_bloom_filter,
         } => {
-            let local_storage = {
-                if let Entry::Vacant(e) = local_storages.entry(table_id) {
-                    e.insert(replay.new_local(table_id).await)
-                } else {
-                    local_storages.get(&table_id).unwrap()
-                }
-            };
-
-            let iter = local_storage
+            let storage = dispatch_replay!(storage_type, replay, local_storages, table_id);
+            let iter = storage
                 .iter(
                     key_range,
                     epoch,
@@ -276,6 +258,7 @@ async fn handle_record(
             }
         }
         Operation::Sync(epoch_id) => {
+            assert_eq!(storage_type, StorageType::Global);
             let sync_result = replay.sync(epoch_id).await.unwrap();
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Sync(expected) = res {
@@ -284,6 +267,7 @@ async fn handle_record(
             }
         }
         Operation::Seal(epoch_id, is_checkpoint) => {
+            assert_eq!(storage_type, StorageType::Global);
             replay.seal_epoch(epoch_id, is_checkpoint).await;
         }
         Operation::IterNext(id) => {
@@ -295,6 +279,7 @@ async fn handle_record(
             }
         }
         Operation::MetaMessage(resp) => {
+            assert_eq!(storage_type, StorageType::Global);
             let op = resp.0.operation();
             if let Some(info) = resp.0.info {
                 replay.notify_hummock(info, op).await.unwrap();
@@ -312,7 +297,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::{MockLocalReplay, MockReplayIter, MockReplayable, StorageType};
+    use crate::{MockReplayIter, MockReplayable, Replayable, StorageType};
 
     #[tokio::test]
     async fn test_handle_record() {
@@ -332,7 +317,7 @@ mod tests {
         let mut mock_replay = MockReplayable::new();
 
         mock_replay.expect_new_local().times(1).returning(|_| {
-            let mut mock_local = MockLocalReplay::new();
+            let mut mock_local = MockReplayable::new();
 
             mock_local
                 .expect_get()
@@ -350,7 +335,7 @@ mod tests {
         });
 
         mock_replay.expect_new_local().times(1).returning(|_| {
-            let mut mock_local = MockLocalReplay::new();
+            let mut mock_local = MockReplayable::new();
 
             mock_local
                 .expect_iter()
