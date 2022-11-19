@@ -76,10 +76,13 @@ impl Replayable for Replay {
             table_id: TableId { table_id },
         };
         let value = match &self {
-            Replay::Global(interface) => interface.store.get(&key, epoch, read_options).await,
-            Replay::Local(local) => local.0.get(&key, epoch, read_options).await,
-        }
-        .unwrap();
+            Replay::Global(interface) => interface
+                .store
+                .get(&key, epoch, read_options)
+                .await
+                .unwrap(),
+            Replay::Local(local) => local.0.get(&key, epoch, read_options).await.unwrap(),
+        };
 
         Ok(value.map(|b| b.to_vec()))
     }
@@ -116,10 +119,12 @@ impl Replayable for Replay {
             Replay::Global(_) => {
                 unreachable!("GlobalStorage does not allow ingest");
             }
-            Replay::Local(local) => local.0.ingest_batch(kv_pairs, delete_ranges, write_options),
-        }
-        .await
-        .map_err(|e| TraceError::IngestFailed(format!("{e}")))?;
+            Replay::Local(local) => local
+                .0
+                .ingest_batch(kv_pairs, delete_ranges, write_options)
+                .await
+                .map_err(|e| TraceError::IngestFailed(format!("{e}")))?,
+        };
 
         Ok(size)
     }
@@ -227,138 +232,7 @@ impl HummockInterface {
     }
 }
 
-// #[async_trait::async_trait]
-// impl Replayable for HummockInterface {
-//     async fn sync(&self, id: u64) -> Result<usize> {
-//         let result: SyncResult = self
-//             .store
-//             .sync(id)
-//             .await
-//             .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
-//         Ok(result.sync_size)
-//     }
-
-//     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
-//         self.store.seal_epoch(epoch_id, is_checkpoint);
-//     }
-
-//     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
-//         let prev_version_id = match &info {
-//             Info::HummockVersionDeltas(deltas) => deltas.version_deltas.last().map(|d|
-// d.prev_id),             _ => None,
-//         };
-
-//         let version = self.notifier.notify_hummock(op, info).await;
-
-//         // wait till version updated
-//         if let Some(prev_version_id) = prev_version_id {
-//             self.store.wait_version_update(prev_version_id).await;
-//         }
-//         Ok(version)
-//     }
-
-//     async fn new_local(&self, table_id: u32) -> Box<dyn ReplayRead + ReplayWrite> {
-//         let table_id = TableId { table_id };
-//         let local_storage = self.store.new_local(table_id).await;
-//         Box::new(LocalReplayInterface(local_storage))
-//     }
-// }
-
 pub(crate) struct LocalReplayInterface(LocalHummockStorage);
-
-// #[async_trait::async_trait]
-// impl LocalReplay for LocalReplayInterface {
-//     async fn get(
-//         &self,
-//         key: Vec<u8>,
-//         check_bloom_filter: bool,
-//         epoch: u64,
-//         prefix_hint: Option<Vec<u8>>,
-//         table_id: u32,
-//         retention_seconds: Option<u32>,
-//     ) -> Result<Option<Vec<u8>>> {
-//         let value = self
-//             .0
-//             .get(
-//                 &key,
-//                 epoch,
-//                 ReadOptions {
-//                     check_bloom_filter,
-//                     table_id: TableId { table_id },
-//                     retention_seconds,
-//                     prefix_hint,
-//                 },
-//             )
-//             .await
-//             .map_err(|e| TraceError::GetFailed(format!("{e}")))?;
-
-//         Ok(value.map(|b| b.to_vec()))
-//     }
-
-//     async fn ingest(
-//         &self,
-//         mut kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-//         mut delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-//         epoch: u64,
-//         table_id: u32,
-//     ) -> Result<usize> {
-//         let kv_pairs = kv_pairs
-//             .drain(..)
-//             .map(|(key, value)| {
-//                 (
-//                     Bytes::from(key),
-//                     StorageValue {
-//                         user_value: value.map(Bytes::from),
-//                     },
-//                 )
-//             })
-//             .collect();
-
-//         let delete_ranges = delete_ranges
-//             .drain(..)
-//             .map(|(left, right)| (Bytes::from(left), Bytes::from(right)))
-//             .collect();
-
-//         let table_id = TableId { table_id };
-
-//         let size = self
-//             .0
-//             .ingest_batch(kv_pairs, delete_ranges, WriteOptions { epoch, table_id })
-//             .await
-//             .map_err(|e| TraceError::IngestFailed(format!("{e}")))?;
-
-//         Ok(size)
-//     }
-
-//     async fn iter(
-//         &self,
-//         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-//         epoch: u64,
-//         prefix_hint: Option<Vec<u8>>,
-//         check_bloom_filter: bool,
-//         retention_seconds: Option<u32>,
-//         table_id: u32,
-//     ) -> Result<Box<dyn ReplayIter>> {
-//         let table_id = TableId { table_id };
-//         let iter = self
-//             .0
-//             .iter(
-//                 key_range,
-//                 epoch,
-//                 ReadOptions {
-//                     prefix_hint,
-//                     check_bloom_filter,
-//                     retention_seconds,
-//                     table_id,
-//                 },
-//             )
-//             .await
-//             .map_err(|e| TraceError::IterFailed(format!("{e}")))?;
-
-//         let iter = HummockReplayIter::new(iter);
-//         Ok(Box::new(iter))
-//     }
-// }
 
 pub struct ReplayNotificationClient<S: MetaStore> {
     addr: HostAddr,

@@ -39,7 +39,6 @@ pub(crate) enum ReplayRequest {
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub(crate) enum WorkerId {
     Local(u64),
-    Global,
     OneShot(u64),
 }
 
@@ -76,36 +75,6 @@ pub trait Replayable: Send + Sync {
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
     async fn new_local(&self, table_id: u32) -> Box<dyn Replayable>;
 }
-
-// #[cfg_attr(test, automock)]
-// #[async_trait::async_trait]
-// pub trait LocalReplay: Send + Sync {
-//     async fn get(
-//         &self,
-//         key: Vec<u8>,
-//         check_bloom_filter: bool,
-//         epoch: u64,
-//         prefix_hint: Option<Vec<u8>>,
-//         table_id: u32,
-//         retention_seconds: Option<u32>,
-//     ) -> Result<Option<Vec<u8>>>;
-//     async fn ingest(
-//         &self,
-//         kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-//         delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-//         epoch: u64,
-//         table_id: u32,
-//     ) -> Result<usize>;
-//     async fn iter(
-//         &self,
-//         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-//         epoch: u64,
-//         prefix_hint: Option<Vec<u8>>,
-//         check_bloom_filter: bool,
-//         retention_seconds: Option<u32>,
-//         table_id: u32,
-//     ) -> Result<Box<dyn ReplayIter>>;
-// }
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::error::Result;
 use crate::read::TraceReader;
@@ -32,6 +33,7 @@ impl<R: TraceReader> HummockReplay<R> {
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        let time = Instant::now();
         let mut worker_scheduler = WorkerScheduler::new();
         let mut total_ops: u64 = 0;
 
@@ -55,7 +57,8 @@ impl<R: TraceReader> HummockReplay<R> {
 
         worker_scheduler.shutdown().await;
 
-        println!("replay finished, totally {} operations", total_ops);
+        println!("Replay finished, totally {} operations", total_ops);
+        println!("Total time {} seconds", time.elapsed().as_secs());
         Ok(())
     }
 }

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
-use std::f32::consts::E;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -28,22 +27,19 @@ use crate::{
 
 pub(crate) struct WorkerScheduler {
     workers: HashMap<WorkerId, WorkerHandler>,
-    non_actor_task_ids: HashSet<RecordId>,
 }
 
 impl WorkerScheduler {
     pub(crate) fn new() -> Self {
         WorkerScheduler {
             workers: HashMap::new(),
-            non_actor_task_ids: HashSet::new(),
         }
     }
 
     pub(crate) fn schedule(&mut self, record: Record, replay: Arc<Box<dyn Replayable>>) {
         let worker_id = self.allocate_worker_id(&record);
-        println!("sc {:?},id {:?}", record, worker_id);
 
-        let handler = self.workers.entry(worker_id.clone()).or_insert_with(|| {
+        let handler = self.workers.entry(worker_id).or_insert_with(|| {
             let (req_tx, req_rx) = unbounded_channel();
             let (resp_tx, resp_rx) = unbounded_channel();
             let (res_tx, res_rx) = unbounded_channel();
@@ -53,10 +49,11 @@ impl WorkerScheduler {
                 res_tx,
                 resp_rx,
                 join,
+                stacked_replay_count: 0,
             }
         });
 
-        handler.send_replay_req(ReplayRequest::Task(record));
+        handler.replay(ReplayRequest::Task(record));
     }
 
     pub(crate) fn send_result(&mut self, record: &Record, trace_result: OperationResult) {
@@ -69,14 +66,12 @@ impl WorkerScheduler {
     pub(crate) async fn wait_finish(&mut self, record: &Record) {
         let worker_id = self.allocate_worker_id(record);
         if let Some(handler) = self.workers.get_mut(&worker_id) {
-            handler.wait_resp().await;
+            handler.wait().await;
 
             if let WorkerId::OneShot(_) = worker_id {
+                let handler = self.workers.remove(&worker_id).unwrap();
                 handler.finish();
-                self.workers.remove(&worker_id);
             }
-        } else {
-            println!("worker not found {:?}", worker_id);
         }
     }
 
@@ -90,32 +85,7 @@ impl WorkerScheduler {
     fn allocate_worker_id(&mut self, record: &Record) -> WorkerId {
         match record.storage_type() {
             StorageType::Local(id) => WorkerId::Local(*id),
-            StorageType::Global => WorkerId::OneShot(record.record_id())
-            //  match record.op() {
-            //     // These operations should run in non-actor
-            //     Operation::Sync(_) | Operation::Seal(_, _) | Operation::MetaMessage(_) => {
-            //         self.non_actor_task_ids.insert(record.record_id());
-            //         WorkerId::OneShot(record.record_id())
-            //     }
-            //     Operation::Result(_) => self.dispatch_global_worker_id(&record),
-            //     Operation::Finish => {
-            //         let id = self.dispatch_global_worker_id(&record);
-            //         // remove a non_actor handler
-            //         if let WorkerId::OneShot(_) = id {
-            //             self.non_actor_task_ids.remove(&record.record_id());
-            //         }
-            //         id
-            //     }
-            //     _ => WorkerId::Global,
-            // },
-        }
-    }
-
-    fn dispatch_global_worker_id(&self, record: &Record) -> WorkerId {
-        if self.non_actor_task_ids.contains(&record.record_id()) {
-            WorkerId::OneShot(record.record_id())
-        } else {
-            WorkerId::Global
+            StorageType::Global => WorkerId::OneShot(record.record_id()),
         }
     }
 }
@@ -125,6 +95,7 @@ struct WorkerHandler {
     res_tx: UnboundedSender<OperationResult>,
     resp_rx: UnboundedReceiver<WorkerResponse>,
     join: JoinHandle<()>,
+    stacked_replay_count: u32,
 }
 
 impl WorkerHandler {
@@ -136,6 +107,21 @@ impl WorkerHandler {
         self.send_replay_req(ReplayRequest::Fin);
     }
 
+    fn replay(&mut self, req: ReplayRequest) {
+        self.stacked_replay_count += 1;
+        self.send_replay_req(req);
+    }
+
+    async fn wait(&mut self) {
+        while self.stacked_replay_count > 0 {
+            self.resp_rx
+                .recv()
+                .await
+                .expect("failed to wait worker resp");
+            self.stacked_replay_count -= 1;
+        }
+    }
+
     fn send_replay_req(&self, req: ReplayRequest) {
         self.req_tx
             .send(req)
@@ -145,19 +131,12 @@ impl WorkerHandler {
     fn send_result(&self, result: OperationResult) {
         self.res_tx.send(result).expect("failed to send result");
     }
-
-    async fn wait_resp(&mut self) {
-        self.resp_rx
-            .recv()
-            .await
-            .expect("failed to wait worker resp");
-    }
 }
 
 pub(crate) async fn replay_worker(
     mut rx: UnboundedReceiver<ReplayRequest>,
     mut res_rx: UnboundedReceiver<OperationResult>,
-    tx: UnboundedSender<WorkerResponse>,
+    resp_tx: UnboundedSender<WorkerResponse>,
     replay: Arc<Box<dyn Replayable>>,
 ) {
     let mut iters_map = HashMap::new();
@@ -174,7 +153,7 @@ pub(crate) async fn replay_worker(
                         &mut local_storages,
                     )
                     .await;
-                    tx.send(()).expect("failed to done task");
+                    resp_tx.send(()).expect("failed to done task");
                 }
                 ReplayRequest::Fin => return,
             }

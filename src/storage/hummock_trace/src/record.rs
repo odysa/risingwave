@@ -57,6 +57,10 @@ impl Record {
         &self.2
     }
 
+    pub fn is_iter_related(&self) -> bool {
+        matches!(self.op(), Operation::Iter { .. } | Operation::IterNext(_))
+    }
+
     #[cfg(test)]
     pub(crate) fn new_local_none(record_id: RecordId, op: Operation) -> Self {
         Self::new(StorageType::Global, record_id, op)
