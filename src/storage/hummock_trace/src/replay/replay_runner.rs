@@ -70,6 +70,7 @@ mod tests {
     use super::*;
     use crate::{
         MockReplayable, MockTraceReader, OperationResult, Record, StorageType, TraceError,
+        TraceResult,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -92,7 +93,9 @@ mod tests {
             ),
             (
                 0,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
+                    get_result.clone(),
+                )))),
             ),
             (0, Operation::Finish),
             (
@@ -101,7 +104,7 @@ mod tests {
             ),
             (
                 3,
-                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
             (3, Operation::Finish),
         ]
@@ -115,7 +118,9 @@ mod tests {
             ),
             (
                 1,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
+                    get_result.clone(),
+                )))),
             ),
             (1, Operation::Finish),
             (
@@ -124,7 +129,7 @@ mod tests {
             ),
             (
                 2,
-                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
             (2, Operation::Finish),
         ]
@@ -138,7 +143,9 @@ mod tests {
             ),
             (
                 4,
-                Operation::Result(OperationResult::Get(Some(Some(get_result.clone())))),
+                Operation::Result(OperationResult::Get(TraceResult::Ok(Some(
+                    get_result.clone(),
+                )))),
             ),
             (4, Operation::Finish),
             (
@@ -147,7 +154,7 @@ mod tests {
             ),
             (
                 5,
-                Operation::Result(OperationResult::Ingest(Some(ingest_result))),
+                Operation::Result(OperationResult::Ingest(TraceResult::Ok(ingest_result))),
             ),
             (5, Operation::Finish),
         ]
@@ -158,7 +165,10 @@ mod tests {
             (6, Operation::Seal(seal_id, seal_checkpoint)),
             (6, Operation::Finish),
             (7, Operation::Sync(sync_id)),
-            (7, Operation::Result(OperationResult::Sync(Some(0)))),
+            (
+                7,
+                Operation::Result(OperationResult::Sync(TraceResult::Ok(0))),
+            ),
             (7, Operation::Finish),
         ]
         .into_iter()

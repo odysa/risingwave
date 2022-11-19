@@ -20,7 +20,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, trace, trace_result, OperationResult, RecordId, StorageType, TraceSpan,
+    init_collector, trace, trace_result, Operation, OperationResult, RecordId, StorageType,
+    TraceResult, TraceSpan,
 };
 
 use super::get_concurrent_id;
@@ -68,18 +69,13 @@ impl<S: StateStoreRead> TracedStateStore<S> {
         &self,
         iter: I,
         record_id: RecordId,
-        storage_type: StorageType,
+        span: TraceSpan,
     ) -> StorageResult<TracedStateStoreIter<S::Iter>>
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
-        let iter = iter.await?;
-        let traced = TracedStateStoreIter {
-            inner: iter,
-            record_id,
-            storage_type,
-        };
-        Ok(traced)
+        let inner = iter.await?;
+        Ok(TracedStateStoreIter::new(inner, record_id, span))
     }
 }
 
@@ -150,10 +146,9 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
                 .traced_iter(
                     self.inner.iter(key_range, epoch, read_options),
                     span.id(),
-                    self.storage_type,
+                    span,
                 )
                 .await;
-            trace_result!(ITER, span, iter);
             iter
         }
     }
@@ -204,7 +199,18 @@ impl TracedStateStore<HummockStorage> {
 pub struct TracedStateStoreIter<I> {
     inner: I,
     record_id: RecordId,
-    storage_type: StorageType,
+    span: TraceSpan,
+}
+
+impl<I> TracedStateStoreIter<I> {
+    fn new(inner: I, record_id: RecordId, span: TraceSpan) -> Self {
+        span.send_result(OperationResult::Iter(TraceResult::Ok(())));
+        TracedStateStoreIter {
+            inner,
+            record_id,
+            span,
+        }
+    }
 }
 
 impl<I> StateStoreIter for TracedStateStoreIter<I>
@@ -217,9 +223,10 @@ where
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            let span = trace!(ITER_NEXT, self.record_id, self.storage_type);
+            self.span.send(Operation::IterNext(self.record_id));
+            // let span = trace!(ITER_NEXT, self.record_id, self.storage_type);
             let kv_pair: _ = self.inner.next().await?;
-            trace_result!(ITER_NEXT, span, kv_pair);
+            trace_result!(ITER_NEXT, self.span, kv_pair);
             Ok(kv_pair)
         }
     }

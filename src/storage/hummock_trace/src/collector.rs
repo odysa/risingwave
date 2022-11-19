@@ -22,7 +22,7 @@ use either::Either;
 use flume::{unbounded, Receiver, Sender};
 
 use crate::write::{TraceWriter, TraceWriterImpl};
-use crate::{Operation, Record, RecordId, RecordIdGenerator};
+use crate::{Operation, OperationResult, Record, RecordId, RecordIdGenerator};
 
 // create a global singleton of collector as well as record id generator
 lazy_static! {
@@ -180,6 +180,10 @@ impl TraceSpan {
         self.tx
             .send(Either::Left(Record::new(self.storage_type, self.id, op)))
             .expect("failed to log record");
+    }
+
+    pub fn send_result(&self, res: OperationResult) {
+        self.send(Operation::Result(res));
     }
 
     pub fn finish(&self) {

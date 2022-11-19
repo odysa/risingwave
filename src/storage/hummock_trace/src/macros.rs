@@ -93,36 +93,26 @@ macro_rules! trace {
 #[macro_export]
 macro_rules! trace_result {
     (GET, $span:ident, $result:ident) => {
-        let res: Option<Option<Vec<u8>>> = $result
-            .as_ref()
-            .map(|o| o.as_ref().map(|b| b.to_vec()))
-            .ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Get(res)));
+        let res: TraceResult<Option<Vec<u8>>> =
+            TraceResult::from($result.as_ref().map(|o| o.as_ref().map(|b| b.to_vec())));
+        $span.send_result(OperationResult::Get(res));
     };
     (INGEST, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(|b| *b).ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Ingest(
-            res,
-        )));
+        let res = TraceResult::from($result.as_ref().map(|b| *b));
+        $span.send_result(OperationResult::Ingest(res));
     };
     (ITER, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(|_| ()).ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Iter(
-            res,
-        )));
+        let res = TraceResult::from($result.as_ref().map(|_| ()));
+        $span.send_result(OperationResult::Iter(res));
     };
-    (ITER_NEXT, $span:ident, $pair:ident) => {
+    (ITER_NEXT, $span:expr, $pair:ident) => {
         let res = $pair
             .as_ref()
             .map(|(k, v)| (k.user_key.table_key.to_vec(), v.to_vec()));
-        $span.send($crate::record::Operation::Result(
-            OperationResult::IterNext(res),
-        ));
+        $span.send_result(OperationResult::IterNext(TraceResult::Ok(res)));
     };
     (SYNC, $span:ident, $result:ident) => {
-        let res = $result.as_ref().map(|res| res.sync_size.clone()).ok();
-        $span.send($crate::record::Operation::Result(OperationResult::Sync(
-            res,
-        )));
+        let res = TraceResult::from($result.as_ref().map(|res| res.sync_size.clone()));
+        $span.send_result(OperationResult::Sync(res));
     };
 }

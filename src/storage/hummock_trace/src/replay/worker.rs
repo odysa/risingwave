@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 use super::{ReplayRequest, WorkerId, WorkerResponse};
 use crate::{
     dispatch_replay, Operation, OperationResult, Record, RecordId, ReplayIter, Replayable,
-    StorageType,
+    StorageType, TraceResult,
 };
 
 pub(crate) struct WorkerScheduler {
@@ -210,7 +210,7 @@ async fn handle_record(
                 .await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Get(expected) = res {
-                assert_eq!(actual.ok(), expected, "get result wrong");
+                assert_eq!(TraceResult::from(actual), expected, "get result wrong");
             }
         }
         Operation::Ingest {
@@ -226,7 +226,7 @@ async fn handle_record(
 
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Ingest(expected) = res {
-                assert_eq!(actual.ok(), expected, "ingest result wrong");
+                assert_eq!(TraceResult::from(actual), expected, "ingest result wrong");
             }
         }
         Operation::Iter {
@@ -250,7 +250,7 @@ async fn handle_record(
                 .await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Iter(expected) = res {
-                if expected.is_some() {
+                if expected.is_ok() {
                     iters_map.insert(record_id, iter.unwrap());
                 } else {
                     assert!(iter.is_err());
@@ -262,8 +262,7 @@ async fn handle_record(
             let sync_result = replay.sync(epoch_id).await.unwrap();
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::Sync(expected) = res {
-                let actual = Some(sync_result);
-                assert_eq!(actual, expected, "sync failed");
+                assert_eq!(TraceResult::Ok(sync_result), expected, "sync failed");
             }
         }
         Operation::Seal(epoch_id, is_checkpoint) => {
@@ -275,7 +274,7 @@ async fn handle_record(
             let actual = iter.next().await;
             let res = res_rx.recv().await.expect("recv result failed");
             if let OperationResult::IterNext(expected) = res {
-                assert_eq!(actual, expected, "iter_next result wrong");
+                assert_eq!(TraceResult::Ok(actual), expected, "iter_next result wrong");
             }
         }
         Operation::MetaMessage(resp) => {
@@ -361,7 +360,7 @@ mod tests {
 
         let replay: Arc<Box<dyn Replayable>> = Arc::new(Box::new(mock_replay));
         res_tx
-            .send(OperationResult::Get(Some(Some(vec![120]))))
+            .send(OperationResult::Get(TraceResult::Ok(Some(vec![120]))))
             .unwrap();
         handle_record(
             record,
@@ -384,7 +383,9 @@ mod tests {
             table_id: 500,
         };
         let record = Record::new(StorageType::Local(0), 1, op);
-        res_tx.send(OperationResult::Iter(Some(()))).unwrap();
+        res_tx
+            .send(OperationResult::Iter(TraceResult::Ok(())))
+            .unwrap();
 
         handle_record(
             record,
@@ -401,7 +402,10 @@ mod tests {
         let op = Operation::IterNext(1);
         let record = Record::new(StorageType::Local(0), 2, op);
         res_tx
-            .send(OperationResult::IterNext(Some((vec![1], vec![0]))))
+            .send(OperationResult::IterNext(TraceResult::Ok(Some((
+                vec![1],
+                vec![0],
+            )))))
             .unwrap();
 
         handle_record(

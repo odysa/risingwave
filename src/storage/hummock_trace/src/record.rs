@@ -159,16 +159,35 @@ impl Operation {
     }
 }
 
-/// `TraceResult` discards Error and only marks whether succeeded or not.
+/// `TraceResult` discards Error and only traces whether succeeded or not.
 /// Use Option rather than Result because it's overhead to serialize Error.
-type TraceResult<T> = Option<T>;
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
+pub enum TraceResult<T> {
+    Ok(T),
+    Err,
+}
+
+impl<T> TraceResult<T> {
+    pub fn is_ok(&self) -> bool {
+        matches!(*self, Self::Ok(_))
+    }
+}
+
+impl<T, E> From<std::result::Result<T, E>> for TraceResult<T> {
+    fn from(value: std::result::Result<T, E>) -> Self {
+        match value {
+            Ok(v) => Self::Ok(v),
+            Err(_) => Self::Err, // discard error
+        }
+    }
+}
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum OperationResult {
     Get(TraceResult<Option<TraceValue>>),
     Ingest(TraceResult<usize>),
     Iter(TraceResult<()>),
-    IterNext(TraceResult<(TraceKey, TraceValue)>),
+    IterNext(TraceResult<Option<(TraceKey, TraceValue)>>),
     Sync(TraceResult<usize>),
     Seal(TraceResult<()>),
     NotifyHummock(TraceResult<()>),
