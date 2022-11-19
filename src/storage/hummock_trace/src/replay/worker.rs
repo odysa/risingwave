@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::f32::consts::E;
 use std::sync::Arc;
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -55,7 +56,7 @@ impl WorkerScheduler {
             }
         });
 
-        handler.send_replay_req(ReplayRequest::Task(vec![record]));
+        handler.send_replay_req(ReplayRequest::Task(record));
     }
 
     pub(crate) fn send_result(&mut self, record: &Record, trace_result: OperationResult) {
@@ -70,10 +71,12 @@ impl WorkerScheduler {
         if let Some(handler) = self.workers.get_mut(&worker_id) {
             handler.wait_resp().await;
 
-            if let WorkerId::NonActor(_) = worker_id {
+            if let WorkerId::OneShot(_) = worker_id {
                 handler.finish();
                 self.workers.remove(&worker_id);
             }
+        } else {
+            println!("worker not found {:?}", worker_id);
         }
     }
 
@@ -87,29 +90,30 @@ impl WorkerScheduler {
     fn allocate_worker_id(&mut self, record: &Record) -> WorkerId {
         match record.storage_type() {
             StorageType::Local(id) => WorkerId::Local(*id),
-            StorageType::Global => match record.op() {
-                // These operations should run in non-actor
-                Operation::Sync(_) | Operation::Seal(_, _) | Operation::MetaMessage(_) => {
-                    self.non_actor_task_ids.insert(record.record_id());
-                    WorkerId::NonActor(record.record_id())
-                }
-                Operation::Result(_) => self.dispatch_global_worker_id(&record),
-                Operation::Finish => {
-                    let id = self.dispatch_global_worker_id(&record);
-                    // remove a non_actor handler
-                    if let WorkerId::NonActor(_) = id {
-                        self.non_actor_task_ids.remove(&record.record_id());
-                    }
-                    id
-                }
-                _ => WorkerId::Global,
-            },
+            StorageType::Global => WorkerId::OneShot(record.record_id())
+            //  match record.op() {
+            //     // These operations should run in non-actor
+            //     Operation::Sync(_) | Operation::Seal(_, _) | Operation::MetaMessage(_) => {
+            //         self.non_actor_task_ids.insert(record.record_id());
+            //         WorkerId::OneShot(record.record_id())
+            //     }
+            //     Operation::Result(_) => self.dispatch_global_worker_id(&record),
+            //     Operation::Finish => {
+            //         let id = self.dispatch_global_worker_id(&record);
+            //         // remove a non_actor handler
+            //         if let WorkerId::OneShot(_) = id {
+            //             self.non_actor_task_ids.remove(&record.record_id());
+            //         }
+            //         id
+            //     }
+            //     _ => WorkerId::Global,
+            // },
         }
     }
 
     fn dispatch_global_worker_id(&self, record: &Record) -> WorkerId {
         if self.non_actor_task_ids.contains(&record.record_id()) {
-            WorkerId::NonActor(record.record_id())
+            WorkerId::OneShot(record.record_id())
         } else {
             WorkerId::Global
         }
@@ -161,17 +165,15 @@ pub(crate) async fn replay_worker(
     loop {
         if let Some(msg) = rx.recv().await {
             match msg {
-                ReplayRequest::Task(record_group) => {
-                    for record in record_group {
-                        handle_record(
-                            record,
-                            &replay,
-                            &mut res_rx,
-                            &mut iters_map,
-                            &mut local_storages,
-                        )
-                        .await;
-                    }
+                ReplayRequest::Task(record) => {
+                    handle_record(
+                        record,
+                        &replay,
+                        &mut res_rx,
+                        &mut iters_map,
+                        &mut local_storages,
+                    )
+                    .await;
                     tx.send(()).expect("failed to done task");
                 }
                 ReplayRequest::Fin => return,

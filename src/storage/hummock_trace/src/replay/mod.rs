@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod replay_runner;
+mod runner;
 mod worker;
 
 use std::ops::Bound;
 
 #[cfg(test)]
 use mockall::automock;
-pub use replay_runner::*;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
+pub use runner::*;
 pub(crate) use worker::*;
 
 use crate::error::Result;
 use crate::Record;
 
-type ReplayGroup = Vec<Record>;
+type ReplayGroup = Record;
 
 type WorkerResponse = ();
 
@@ -40,7 +40,7 @@ pub(crate) enum ReplayRequest {
 pub(crate) enum WorkerId {
     Local(u64),
     Global,
-    NonActor(u64),
+    OneShot(u64),
 }
 
 #[cfg_attr(test, automock)]
