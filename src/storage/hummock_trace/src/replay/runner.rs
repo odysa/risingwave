@@ -85,7 +85,11 @@ mod tests {
         let sync_id = 4561245432;
         let seal_id = 5734875243;
 
-        let storage_type = StorageType::Local(0);
+        let storage_type1 = StorageType::Local(0);
+        let storage_type2 = StorageType::Local(1);
+        let storage_type3 = StorageType::Local(2);
+        let storage_type4 = StorageType::Global;
+
         let table_id1 = 1;
         let table_id2 = 2;
         let table_id3 = 3;
@@ -112,7 +116,7 @@ mod tests {
             (3, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type1, record_id, op)));
 
         let actor_2 = vec![
             (
@@ -137,7 +141,7 @@ mod tests {
             (2, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type2, record_id, op)));
 
         let actor_3 = vec![
             (
@@ -162,7 +166,7 @@ mod tests {
             (5, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)));
+        .map(|(record_id, op)| Ok(Record::new(storage_type3, record_id, op)));
 
         let mut non_local: Vec<Result<Record>> = vec![
             (6, Operation::Seal(seal_id, seal_checkpoint)),
@@ -175,7 +179,7 @@ mod tests {
             (7, Operation::Finish),
         ]
         .into_iter()
-        .map(|(record_id, op)| Ok(Record::new(storage_type, record_id, op)))
+        .map(|(record_id, op)| Ok(Record::new(storage_type4, record_id, op)))
         .collect();
 
         // interleave vectors to simulate concurrency

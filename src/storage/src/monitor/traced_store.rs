@@ -34,7 +34,6 @@ use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
     define_state_store_write_associated_type, StateStore, StateStoreIter,
 };
-// use crate::monitor::get_concurrent_id;
 
 #[derive(Clone)]
 pub struct TracedStateStore<S> {
@@ -191,8 +190,8 @@ impl TracedStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.inner.sstable_id_manager().clone()
+    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        self.inner.sstable_id_manager()
     }
 }
 

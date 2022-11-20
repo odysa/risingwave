@@ -262,7 +262,7 @@ impl MonitoredStateStore<HummockStorage> {
     }
 
     pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.inner.sstable_id_manager()
+        self.inner.sstable_id_manager().clone()
     }
 }
 
