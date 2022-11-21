@@ -21,7 +21,7 @@ data_directory = "hummock_003"
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024
 compactor_memory_limit_mb = 5120
-local_object_store = "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
+# local_object_store = "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
 
 [storage.file_cache]
 capacity_mb = 1024
