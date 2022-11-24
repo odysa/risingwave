@@ -23,19 +23,30 @@ use crate::StorageType;
 
 pub type RecordId = u64;
 
-pub(crate) struct RecordIdGenerator {
-    record_id: AtomicU64,
+pub type RecordIdGenerator = UniqueIdGenerator<AtomicU64>;
+pub type ConcurrentIdGenerator = UniqueIdGenerator<AtomicU64>;
+
+pub trait UniqueId<T> {
+    fn inc(&self) -> T;
 }
 
-impl RecordIdGenerator {
-    pub(crate) fn new() -> Self {
-        Self {
-            record_id: AtomicU64::new(0),
-        }
+impl UniqueId<u64> for AtomicU64 {
+    fn inc(&self) -> u64 {
+        self.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+pub struct UniqueIdGenerator<T> {
+    id: T,
+}
+
+impl<T: UniqueId<u64>> UniqueIdGenerator<T> {
+    pub fn new(id: T) -> Self {
+        Self { id }
     }
 
-    pub(crate) fn next(&self) -> RecordId {
-        self.record_id.fetch_add(1, Ordering::Relaxed)
+    pub fn next(&self) -> RecordId {
+        self.id.inc()
     }
 }
 
@@ -257,12 +268,11 @@ mod tests {
 
     // test atomic id
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_atomic_span_id() {
-        // reset record id to be 0
-        let gen = Arc::new(RecordIdGenerator::new());
+    async fn test_atomic_id() {
+        let gen = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
         let mut handles = Vec::new();
         let ids_lock = Arc::new(Mutex::new(HashSet::new()));
-        let count: u64 = 10;
+        let count: u64 = 5000;
 
         for _ in 0..count {
             let ids = ids_lock.clone();
