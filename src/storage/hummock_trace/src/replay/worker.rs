@@ -63,19 +63,10 @@ impl ReplayWorkerScheduler for WorkerScheduler {
     fn schedule(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
 
-        let handler = self.workers.entry(worker_id).or_insert_with(|| {
-            let (req_tx, req_rx) = unbounded_channel();
-            let (resp_tx, resp_rx) = unbounded_channel();
-            let (res_tx, res_rx) = unbounded_channel();
-            let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, self.replay.clone()));
-            WorkerHandler {
-                req_tx,
-                res_tx,
-                resp_rx,
-                join,
-                stacked_replay_count: 0,
-            }
-        });
+        let handler = self
+            .workers
+            .entry(worker_id)
+            .or_insert_with(|| ReplayWorker::spawn(self.replay.clone()));
 
         handler.replay(ReplayRequest::Task(record));
     }
@@ -105,6 +96,137 @@ impl ReplayWorkerScheduler for WorkerScheduler {
         for handler in self.workers.into_values() {
             handler.finish();
             handler.join().await;
+        }
+    }
+}
+
+struct ReplayWorker {}
+
+impl ReplayWorker {
+    fn spawn(replay: Arc<Box<dyn Replayable>>) -> WorkerHandler {
+        let (req_tx, req_rx) = unbounded_channel();
+        let (resp_tx, resp_rx) = unbounded_channel();
+        let (res_tx, res_rx) = unbounded_channel();
+
+        let join = tokio::spawn(Self::run(req_rx, res_rx, resp_tx, replay));
+        WorkerHandler {
+            req_tx,
+            res_tx,
+            resp_rx,
+            join,
+            stacked_replay_count: 0,
+        }
+    }
+
+    async fn run(
+        mut req_rx: UnboundedReceiver<ReplayRequest>,
+        mut res_rx: UnboundedReceiver<OperationResult>,
+        resp_tx: UnboundedSender<WorkerResponse>,
+        replay: Arc<Box<dyn Replayable>>,
+    ) {
+        let mut iters_map = HashMap::new();
+        let mut local_storages = HashMap::new();
+        loop {
+            if let Some(msg) = req_rx.recv().await {
+                match msg {
+                    ReplayRequest::Task(record) => {
+                        Self::handle_record(
+                            record,
+                            &replay,
+                            &mut res_rx,
+                            &mut iters_map,
+                            &mut local_storages,
+                        )
+                        .await;
+                        resp_tx.send(()).expect("failed to done task");
+                    }
+                    ReplayRequest::Fin => return,
+                }
+            }
+        }
+    }
+
+    async fn handle_record(
+        record: Record,
+        replay: &Arc<Box<dyn Replayable>>,
+        res_rx: &mut UnboundedReceiver<OperationResult>,
+        iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
+        local_storages: &mut HashMap<u32, Box<dyn Replayable>>,
+    ) {
+        let Record(storage_type, record_id, op) = record;
+        match op {
+            Operation::Get {
+                key,
+                epoch,
+                read_options,
+            } => {
+                let storage =
+                    dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
+                let actual = storage.get(key, epoch, read_options).await;
+                let res = res_rx.recv().await.expect("recv result failed");
+                if let OperationResult::Get(expected) = res {
+                    assert_eq!(TraceResult::from(actual), expected, "get result wrong");
+                }
+            }
+            Operation::Ingest {
+                kv_pairs,
+                delete_ranges,
+                write_options,
+            } => {
+                let storage =
+                    dispatch_replay!(storage_type, replay, local_storages, write_options.table_id);
+                let actual = storage.ingest(kv_pairs, delete_ranges, write_options).await;
+
+                let res = res_rx.recv().await.expect("recv result failed");
+                if let OperationResult::Ingest(expected) = res {
+                    assert_eq!(TraceResult::from(actual), expected, "ingest result wrong");
+                }
+            }
+            Operation::Iter {
+                key_range,
+                epoch,
+                read_options,
+            } => {
+                let storage =
+                    dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
+                let iter = storage.iter(key_range, epoch, read_options).await;
+                let res = res_rx.recv().await.expect("recv result failed");
+                if let OperationResult::Iter(expected) = res {
+                    if expected.is_ok() {
+                        iters_map.insert(record_id, iter.unwrap());
+                    } else {
+                        assert!(iter.is_err());
+                    }
+                }
+            }
+            Operation::Sync(epoch_id) => {
+                assert_eq!(storage_type, StorageType::Global);
+                let sync_result = replay.sync(epoch_id).await.unwrap();
+                let res = res_rx.recv().await.expect("recv result failed");
+                if let OperationResult::Sync(expected) = res {
+                    assert_eq!(TraceResult::Ok(sync_result), expected, "sync failed");
+                }
+            }
+            Operation::Seal(epoch_id, is_checkpoint) => {
+                assert_eq!(storage_type, StorageType::Global);
+                replay.seal_epoch(epoch_id, is_checkpoint).await;
+            }
+            Operation::IterNext(id) => {
+                let iter = iters_map.get_mut(&id).expect("iter not in worker");
+                let actual = iter.next().await;
+                let res = res_rx.recv().await.expect("recv result failed");
+                if let OperationResult::IterNext(expected) = res {
+                    assert_eq!(TraceResult::Ok(actual), expected, "iter_next result wrong");
+                }
+            }
+            Operation::MetaMessage(resp) => {
+                assert_eq!(storage_type, StorageType::Global);
+                let op = resp.0.operation();
+                if let Some(info) = resp.0.info {
+                    replay.notify_hummock(info, op).await.unwrap();
+                }
+            }
+            _ => unreachable!(),
         }
     }
 }
@@ -149,118 +271,6 @@ impl WorkerHandler {
 
     fn send_result(&self, result: OperationResult) {
         self.res_tx.send(result).expect("failed to send result");
-    }
-}
-
-pub(crate) async fn replay_worker(
-    mut rx: UnboundedReceiver<ReplayRequest>,
-    mut res_rx: UnboundedReceiver<OperationResult>,
-    resp_tx: UnboundedSender<WorkerResponse>,
-    replay: Arc<Box<dyn Replayable>>,
-) {
-    let mut iters_map = HashMap::new();
-    let mut local_storages = HashMap::new();
-    loop {
-        if let Some(msg) = rx.recv().await {
-            match msg {
-                ReplayRequest::Task(record) => {
-                    handle_record(
-                        record,
-                        &replay,
-                        &mut res_rx,
-                        &mut iters_map,
-                        &mut local_storages,
-                    )
-                    .await;
-                    resp_tx.send(()).expect("failed to done task");
-                }
-                ReplayRequest::Fin => return,
-            }
-        }
-    }
-}
-
-async fn handle_record(
-    record: Record,
-    replay: &Arc<Box<dyn Replayable>>,
-    res_rx: &mut UnboundedReceiver<OperationResult>,
-    iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
-    local_storages: &mut HashMap<u32, Box<dyn Replayable>>,
-) {
-    let Record(storage_type, record_id, op) = record;
-    match op {
-        Operation::Get {
-            key,
-            epoch,
-            read_options,
-        } => {
-            let storage =
-                dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
-            let actual = storage.get(key, epoch, read_options).await;
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Get(expected) = res {
-                assert_eq!(TraceResult::from(actual), expected, "get result wrong");
-            }
-        }
-        Operation::Ingest {
-            kv_pairs,
-            delete_ranges,
-            write_options,
-        } => {
-            let storage =
-                dispatch_replay!(storage_type, replay, local_storages, write_options.table_id);
-            let actual = storage.ingest(kv_pairs, delete_ranges, write_options).await;
-
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Ingest(expected) = res {
-                assert_eq!(TraceResult::from(actual), expected, "ingest result wrong");
-            }
-        }
-        Operation::Iter {
-            key_range,
-            epoch,
-            read_options,
-        } => {
-            let storage =
-                dispatch_replay!(storage_type, replay, local_storages, read_options.table_id);
-            let iter = storage.iter(key_range, epoch, read_options).await;
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Iter(expected) = res {
-                if expected.is_ok() {
-                    iters_map.insert(record_id, iter.unwrap());
-                } else {
-                    assert!(iter.is_err());
-                }
-            }
-        }
-        Operation::Sync(epoch_id) => {
-            assert_eq!(storage_type, StorageType::Global);
-            let sync_result = replay.sync(epoch_id).await.unwrap();
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::Sync(expected) = res {
-                assert_eq!(TraceResult::Ok(sync_result), expected, "sync failed");
-            }
-        }
-        Operation::Seal(epoch_id, is_checkpoint) => {
-            assert_eq!(storage_type, StorageType::Global);
-            replay.seal_epoch(epoch_id, is_checkpoint).await;
-        }
-        Operation::IterNext(id) => {
-            let iter = iters_map.get_mut(&id).expect("iter not in worker");
-            let actual = iter.next().await;
-            let res = res_rx.recv().await.expect("recv result failed");
-            if let OperationResult::IterNext(expected) = res {
-                assert_eq!(TraceResult::Ok(actual), expected, "iter_next result wrong");
-            }
-        }
-        Operation::MetaMessage(resp) => {
-            assert_eq!(storage_type, StorageType::Global);
-            let op = resp.0.operation();
-            if let Some(info) = resp.0.info {
-                replay.notify_hummock(info, op).await.unwrap();
-            }
-        }
-        _ => unreachable!(),
     }
 }
 
@@ -344,7 +354,7 @@ mod tests {
         res_tx
             .send(OperationResult::Get(TraceResult::Ok(Some(vec![120]))))
             .unwrap();
-        handle_record(
+        ReplayWorker::handle_record(
             record,
             &replay,
             &mut res_rx,
@@ -366,7 +376,7 @@ mod tests {
             .send(OperationResult::Iter(TraceResult::Ok(())))
             .unwrap();
 
-        handle_record(
+        ReplayWorker::handle_record(
             record,
             &replay,
             &mut res_rx,
@@ -387,7 +397,7 @@ mod tests {
             )))))
             .unwrap();
 
-        handle_record(
+        ReplayWorker::handle_record(
             record,
             &replay,
             &mut res_rx,
