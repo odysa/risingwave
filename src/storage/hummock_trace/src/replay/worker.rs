@@ -25,25 +25,49 @@ use crate::{
     StorageType, TraceResult,
 };
 
+#[async_trait::async_trait]
+pub trait ReplayWorkerScheduler {
+    // schedule a replaying task for given record
+    fn schedule(&mut self, record: Record);
+    // send result of an operation for a worker
+    fn send_result(&mut self, record: Record);
+    // wait an operation finishes
+    async fn wait_finish(&mut self, record: Record);
+    // gracefully shutdown all workers
+    async fn shutdown(self);
+}
+
 pub(crate) struct WorkerScheduler {
     workers: HashMap<WorkerId, WorkerHandler>,
+    replay: Arc<Box<dyn Replayable>>,
 }
 
 impl WorkerScheduler {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(replay: Arc<Box<dyn Replayable>>) -> Self {
         WorkerScheduler {
             workers: HashMap::new(),
+            replay,
         }
     }
 
-    pub(crate) fn schedule(&mut self, record: Record, replay: Arc<Box<dyn Replayable>>) {
+    fn allocate_worker_id(&mut self, record: &Record) -> WorkerId {
+        match record.storage_type() {
+            StorageType::Local(id) => WorkerId::Local(*id),
+            StorageType::Global => WorkerId::OneShot(record.record_id()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ReplayWorkerScheduler for WorkerScheduler {
+    fn schedule(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
 
         let handler = self.workers.entry(worker_id).or_insert_with(|| {
             let (req_tx, req_rx) = unbounded_channel();
             let (resp_tx, resp_rx) = unbounded_channel();
             let (res_tx, res_rx) = unbounded_channel();
-            let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, replay));
+            let join = tokio::spawn(replay_worker(req_rx, res_rx, resp_tx, self.replay.clone()));
             WorkerHandler {
                 req_tx,
                 res_tx,
@@ -56,7 +80,7 @@ impl WorkerScheduler {
         handler.replay(ReplayRequest::Task(record));
     }
 
-    pub(crate) fn send_result(&mut self, record: Record) {
+    fn send_result(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
         if let Operation::Result(trace_result) = record.2 {
             if let Some(handler) = self.workers.get_mut(&worker_id) {
@@ -65,7 +89,7 @@ impl WorkerScheduler {
         }
     }
 
-    pub(crate) async fn wait_finish(&mut self, record: Record) {
+    async fn wait_finish(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
         if let Some(handler) = self.workers.get_mut(&worker_id) {
             handler.wait().await;
@@ -77,17 +101,10 @@ impl WorkerScheduler {
         }
     }
 
-    pub(crate) async fn shutdown(self) {
+    async fn shutdown(self) {
         for handler in self.workers.into_values() {
             handler.finish();
             handler.join().await;
-        }
-    }
-
-    fn allocate_worker_id(&mut self, record: &Record) -> WorkerId {
-        match record.storage_type() {
-            StorageType::Local(id) => WorkerId::Local(*id),
-            StorageType::Global => WorkerId::OneShot(record.record_id()),
         }
     }
 }
