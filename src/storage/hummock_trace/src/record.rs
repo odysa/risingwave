@@ -26,12 +26,15 @@ pub type RecordId = u64;
 pub type RecordIdGenerator = UniqueIdGenerator<AtomicU64>;
 pub type ConcurrentIdGenerator = UniqueIdGenerator<AtomicU64>;
 
-pub trait UniqueId<T> {
-    fn inc(&self) -> T;
+pub trait UniqueId {
+    type Type;
+    fn inc(&self) -> Self::Type;
 }
 
-impl UniqueId<u64> for AtomicU64 {
-    fn inc(&self) -> u64 {
+impl UniqueId for AtomicU64 {
+    type Type = u64;
+
+    fn inc(&self) -> Self::Type {
         self.fetch_add(1, Ordering::Relaxed)
     }
 }
@@ -40,12 +43,12 @@ pub struct UniqueIdGenerator<T> {
     id: T,
 }
 
-impl<T: UniqueId<u64>> UniqueIdGenerator<T> {
+impl<T: UniqueId> UniqueIdGenerator<T> {
     pub fn new(id: T) -> Self {
         Self { id }
     }
 
-    pub fn next(&self) -> RecordId {
+    pub fn next(&self) -> T::Type {
         self.id.inc()
     }
 }
