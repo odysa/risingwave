@@ -149,3 +149,10 @@ macro_rules! send_result {
         }
     };
 }
+
+#[macro_export]
+macro_rules! traced_bytes {
+    ($vec:expr) => {
+        risingwave_hummock_trace::TracedBytes::from($vec)
+    };
+}

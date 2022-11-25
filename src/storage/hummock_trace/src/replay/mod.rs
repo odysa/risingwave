@@ -24,7 +24,7 @@ pub use runner::*;
 pub(crate) use worker::*;
 
 use crate::error::Result;
-use crate::{Record, TraceReadOptions, TraceWriteOptions};
+use crate::{Record, TraceReadOptions, TraceWriteOptions, TracedBytes};
 
 type ReplayGroup = Record;
 
@@ -46,45 +46,19 @@ pub trait GlobalReplay: ReplayRead + ReplayStateStore + Send + Sync {}
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
-pub trait Replayable: Send + Sync {
-    async fn get(
-        &self,
-        key: Vec<u8>,
-        epoch: u64,
-        read_options: TraceReadOptions,
-    ) -> Result<Option<Vec<u8>>>;
-    async fn ingest(
-        &self,
-        kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-        delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
-        write_options: TraceWriteOptions,
-    ) -> Result<usize>;
-    async fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        read_options: TraceReadOptions,
-    ) -> Result<Box<dyn ReplayIter>>;
-    async fn sync(&self, id: u64) -> Result<usize>;
-    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
-    async fn new_local(&self, table_id: u32) -> Box<dyn Replayable>;
-}
-#[cfg_attr(test, automock)]
-#[async_trait::async_trait]
 pub trait ReplayRead {
     async fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
         read_options: TraceReadOptions,
     ) -> Result<Box<dyn ReplayIter>>;
     async fn get(
         &self,
-        key: Vec<u8>,
+        key: TracedBytes,
         epoch: u64,
         read_options: TraceReadOptions,
-    ) -> Result<Option<Vec<u8>>>;
+    ) -> Result<Option<TracedBytes>>;
 }
 
 #[cfg_attr(test, automock)]
@@ -92,8 +66,8 @@ pub trait ReplayRead {
 pub trait ReplayWrite {
     async fn ingest(
         &self,
-        kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-        delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+        kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+        delete_ranges: Vec<(TracedBytes, TracedBytes)>,
         write_options: TraceWriteOptions,
     ) -> Result<usize>;
 }
@@ -121,23 +95,23 @@ mock! {
     impl ReplayRead for GlobalReplayInterface{
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
             epoch: u64,
             read_options: TraceReadOptions,
         ) -> Result<Box<dyn ReplayIter>>;
         async fn get(
             &self,
-            key: Vec<u8>,
+            key: TracedBytes,
             epoch: u64,
             read_options: TraceReadOptions,
-        ) -> Result<Option<Vec<u8>>>;
+        ) -> Result<Option<TracedBytes>>;
     }
     #[async_trait::async_trait]
     impl ReplayWrite for GlobalReplayInterface{
         async fn ingest(
             &self,
-            kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-            delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+            kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+            delete_ranges: Vec<(TracedBytes, TracedBytes)>,
             write_options: TraceWriteOptions,
         ) -> Result<usize>;
     }
@@ -158,23 +132,23 @@ mock! {
     impl ReplayRead for LocalReplayInterface{
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
             epoch: u64,
             read_options: TraceReadOptions,
         ) -> Result<Box<dyn ReplayIter>>;
         async fn get(
             &self,
-            key: Vec<u8>,
+            key: TracedBytes,
             epoch: u64,
             read_options: TraceReadOptions,
-        ) -> Result<Option<Vec<u8>>>;
+        ) -> Result<Option<TracedBytes>>;
     }
     #[async_trait::async_trait]
     impl ReplayWrite for LocalReplayInterface{
         async fn ingest(
             &self,
-            kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-            delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+            kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+            delete_ranges: Vec<(TracedBytes, TracedBytes)>,
             write_options: TraceWriteOptions,
         ) -> Result<usize>;
     }

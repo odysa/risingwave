@@ -80,13 +80,13 @@ mod tests {
     use super::*;
     use crate::{
         MockGlobalReplayInterface, MockLocalReplayInterface, MockTraceReader, OperationResult,
-        Record, StorageType, TraceError, TraceResult,
+        Record, StorageType, TraceError, TraceResult, TracedBytes,
     };
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_replay() {
         let mut mock_reader = MockTraceReader::new();
-        let get_result = vec![54, 32, 198, 236, 24];
+        let get_result = TracedBytes::from(vec![54, 32, 198, 236, 24]);
         let ingest_result = 536248723;
         let seal_checkpoint = true;
         let sync_id = 4561245432;
@@ -104,7 +104,7 @@ mod tests {
             (
                 0,
                 Operation::get(
-                    vec![0, 1, 2, 3],
+                    TracedBytes::from(vec![0, 1, 2, 3]),
                     123,
                     None,
                     true,
@@ -122,7 +122,15 @@ mod tests {
             (0, Operation::Finish),
             (
                 3,
-                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, table_id1),
+                Operation::ingest(
+                    vec![(
+                        TracedBytes::from(vec![123]),
+                        Some(TracedBytes::from(vec![123])),
+                    )],
+                    vec![],
+                    4,
+                    table_id1,
+                ),
             ),
             (
                 3,
@@ -137,7 +145,7 @@ mod tests {
             (
                 1,
                 Operation::get(
-                    vec![0, 1, 2, 3],
+                    TracedBytes::from(vec![0, 1, 2, 3]),
                     123,
                     None,
                     true,
@@ -155,7 +163,15 @@ mod tests {
             (1, Operation::Finish),
             (
                 2,
-                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, table_id2),
+                Operation::ingest(
+                    vec![(
+                        TracedBytes::from(vec![123]),
+                        Some(TracedBytes::from(vec![123])),
+                    )],
+                    vec![],
+                    4,
+                    table_id2,
+                ),
             ),
             (
                 2,

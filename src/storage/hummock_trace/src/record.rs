@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
+use bytes::Bytes;
 use prost::Message;
 use risingwave_pb::meta::SubscribeResponse;
 
@@ -83,48 +84,39 @@ impl Record {
     }
 }
 
-type TraceKey = Vec<u8>;
 type TraceValue = Vec<u8>;
 type TableId = u32;
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
     /// Get operation of Hummock.
-    /// (key, check_bloom_filter, epoch, table_id, retention_seconds)
-    // Get(TraceKey, bool, u64, u32, Option<u32>),
     Get {
-        key: TraceKey,
+        key: TracedBytes,
         epoch: u64,
         read_options: TraceReadOptions,
     },
 
     /// Ingest operation of Hummock.
-    /// (kv_pairs, epoch, table_id)
-    // Ingest(Vec<(TraceKey, Option<TraceValue>)>, u64, u32),
     Ingest {
-        kv_pairs: Vec<(TraceKey, Option<TraceValue>)>,
-        delete_ranges: Vec<(TraceKey, TraceKey)>,
+        kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+        delete_ranges: Vec<(TracedBytes, TracedBytes)>,
         write_options: TraceWriteOptions,
     },
 
     /// Iter operation of Hummock
-    /// (prefix_hint, left_bound, right_bound, epoch, table_id, retention_seconds)
     Iter {
-        key_range: (Bound<TraceKey>, Bound<TraceValue>),
+        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
         read_options: TraceReadOptions,
     },
 
     /// Iter.next operation
-    /// (record_id, kv_pair)
     IterNext(RecordId),
 
     /// Sync operation
-    /// (epoch)
     Sync(u64),
 
     /// Seal operation
-    /// (epoch, is_checkpoint)
     Seal(u64, bool),
 
     MetaMessage(Box<TraceSubResp>),
@@ -137,9 +129,9 @@ pub enum Operation {
 
 impl Operation {
     pub fn get(
-        key: TraceKey,
+        key: TracedBytes,
         epoch: u64,
-        prefix_hint: Option<TraceKey>,
+        prefix_hint: Option<Vec<u8>>,
         check_bloom_filter: bool,
         retention_seconds: Option<u32>,
         table_id: TableId,
@@ -159,8 +151,8 @@ impl Operation {
     }
 
     pub fn ingest(
-        kv_pairs: Vec<(TraceKey, Option<TraceValue>)>,
-        delete_ranges: Vec<(TraceKey, TraceKey)>,
+        kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+        delete_ranges: Vec<(TracedBytes, TracedBytes)>,
         epoch: u64,
         table_id: TableId,
     ) -> Operation {
@@ -169,6 +161,41 @@ impl Operation {
             delete_ranges,
             write_options: TraceWriteOptions { epoch, table_id },
         }
+    }
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct TracedBytes(Bytes);
+
+impl Encode for TracedBytes {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        Encode::encode(&self.0.as_ref(), encoder)
+    }
+}
+
+impl Decode for TracedBytes {
+    fn decode<D: bincode::de::Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        let buf: Vec<u8> = Decode::decode(decoder)?;
+        let bytes = Bytes::from(buf);
+        Ok(Self(bytes))
+    }
+}
+
+impl<'de> bincode::BorrowDecode<'de> for TracedBytes {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> core::result::Result<Self, bincode::error::DecodeError> {
+        let buf: Vec<u8> = Decode::decode(decoder)?;
+        let bytes = Bytes::from(buf);
+        Ok(Self(bytes))
+    }
+}
+
+impl From<Vec<u8>> for TracedBytes {
+    fn from(value: Vec<u8>) -> Self {
+        Self(Bytes::from(value))
     }
 }
 
@@ -197,10 +224,10 @@ impl<T, E> From<std::result::Result<T, E>> for TraceResult<T> {
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum OperationResult {
-    Get(TraceResult<Option<TraceValue>>),
+    Get(TraceResult<Option<TracedBytes>>),
     Ingest(TraceResult<usize>),
     Iter(TraceResult<()>),
-    IterNext(TraceResult<Option<(TraceKey, TraceValue)>>),
+    IterNext(TraceResult<Option<(TracedBytes, TracedBytes)>>),
     Sync(TraceResult<usize>),
     Seal(TraceResult<()>),
     NotifyHummock(TraceResult<()>),

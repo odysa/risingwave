@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-  
+
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -325,7 +325,7 @@ mod tests {
     use super::*;
     use crate::{
         MockGlobalReplayInterface, MockLocalReplayInterface, MockReplayIter, StorageType,
-        TraceReadOptions,
+        TraceReadOptions, TracedBytes,
     };
 
     #[tokio::test]
@@ -349,7 +349,7 @@ mod tests {
             ignore_range_tombstone: true,
         };
         let op = Operation::Get {
-            key: vec![123],
+            key: TracedBytes::from(vec![123]),
             epoch: 123,
             read_options: read_options.clone(),
         };
@@ -363,7 +363,7 @@ mod tests {
             mock_local
                 .expect_get()
                 .with(
-                    predicate::eq(vec![123]),
+                    predicate::eq(TracedBytes::from(vec![123])),
                     predicate::eq(123),
                     predicate::always(),
                 )
