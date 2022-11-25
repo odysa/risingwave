@@ -22,7 +22,7 @@ use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, ReplayIter, ReplayRead, ReplayStateStore, ReplayWrite, Result,
-    TraceError, TraceReadOptions, TraceSubResp, TraceWriteOptions, TracedBytes,
+    TraceError, TraceReadOptions, TraceSubResp, TracedBytes, TracedWriteOptions,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
@@ -55,7 +55,7 @@ impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> ReplayIt
         key_value.map(|(key, value)| {
             (
                 TracedBytes::from(key.user_key.table_key.to_vec()),
-                TracedBytes::from(value.clone()),
+                TracedBytes::from(value),
             )
         })
     }
@@ -102,7 +102,7 @@ impl ReplayRead for GlobalReplayInterface {
 
         let value = self.store.get(&key, epoch, read_options).await.unwrap();
 
-        Ok(value.map(|b| TracedBytes::from(b.clone())))
+        Ok(value.map(TracedBytes::from))
     }
 }
 
@@ -176,7 +176,7 @@ impl ReplayRead for LocalReplayInterface {
 
         let value = self.0.get(&key, epoch, read_options).await.unwrap();
 
-        Ok(value.map(|b| TracedBytes::from(b.clone())))
+        Ok(value.map(TracedBytes::from))
     }
 }
 
@@ -184,25 +184,25 @@ impl ReplayRead for LocalReplayInterface {
 impl ReplayWrite for LocalReplayInterface {
     async fn ingest(
         &self,
-        mut kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
-        mut delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-        write_options: TraceWriteOptions,
+        kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+        delete_ranges: Vec<(TracedBytes, TracedBytes)>,
+        write_options: TracedWriteOptions,
     ) -> Result<usize> {
         let kv_pairs = kv_pairs
-            .drain(..)
+            .into_iter()
             .map(|(key, value)| {
                 (
-                    key.into(),
+                    key.into_bytes(),
                     StorageValue {
-                        user_value: value.map(Into::into),
+                        user_value: value.map(TracedBytes::into_bytes),
                     },
                 )
             })
             .collect();
 
         let delete_ranges = delete_ranges
-            .drain(..)
-            .map(|(left, right)| (left.into(), right.into()))
+            .into_iter()
+            .map(|(left, right)| (left.into_bytes(), right.into_bytes()))
             .collect();
 
         let write_options = from_trace_write_options(write_options);
@@ -298,7 +298,7 @@ fn from_trace_read_options(opt: TraceReadOptions) -> ReadOptions {
     }
 }
 
-fn from_trace_write_options(opt: TraceWriteOptions) -> WriteOptions {
+fn from_trace_write_options(opt: TracedWriteOptions) -> WriteOptions {
     WriteOptions {
         epoch: opt.epoch,
         table_id: TableId {

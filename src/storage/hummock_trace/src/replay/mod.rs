@@ -24,7 +24,7 @@ pub use runner::*;
 pub(crate) use worker::*;
 
 use crate::error::Result;
-use crate::{Record, TraceReadOptions, TraceWriteOptions, TracedBytes};
+use crate::{Record, TraceReadOptions, TracedBytes, TracedWriteOptions};
 
 type ReplayGroup = Record;
 
@@ -68,7 +68,7 @@ pub trait ReplayWrite {
         &self,
         kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
         delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-        write_options: TraceWriteOptions,
+        write_options: TracedWriteOptions,
     ) -> Result<usize>;
 }
 
@@ -112,7 +112,7 @@ mock! {
             &self,
             kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
             delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-            write_options: TraceWriteOptions,
+            write_options: TracedWriteOptions,
         ) -> Result<usize>;
     }
     #[async_trait::async_trait]
@@ -149,7 +149,7 @@ mock! {
             &self,
             kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
             delete_ranges: Vec<(TracedBytes, TracedBytes)>,
-            write_options: TraceWriteOptions,
+            write_options: TracedWriteOptions,
         ) -> Result<usize>;
     }
     impl LocalReplay for LocalReplayInterface{}
