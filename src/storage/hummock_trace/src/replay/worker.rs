@@ -83,7 +83,6 @@ impl ReplayWorkerScheduler for WorkerScheduler {
         let worker_id = self.allocate_worker_id(&record);
         if let Some(handler) = self.workers.get_mut(&worker_id) {
             handler.wait().await;
-
             if let WorkerId::OneShot(_) = worker_id {
                 let handler = self.workers.remove(&worker_id).unwrap();
                 handler.finish();
@@ -125,22 +124,20 @@ impl ReplayWorker {
     ) {
         let mut iters_map = HashMap::new();
         let mut local_storages = LocalStorages::new();
-        loop {
-            if let Some(msg) = req_rx.recv().await {
-                match msg {
-                    ReplayRequest::Task(record) => {
-                        Self::handle_record(
-                            record,
-                            &replay,
-                            &mut res_rx,
-                            &mut iters_map,
-                            &mut local_storages,
-                        )
-                        .await;
-                        resp_tx.send(()).expect("failed to done task");
-                    }
-                    ReplayRequest::Fin => return,
+        while let Some(msg) = req_rx.recv().await {
+            match msg {
+                ReplayRequest::Task(record) => {
+                    Self::handle_record(
+                        record,
+                        &replay,
+                        &mut res_rx,
+                        &mut iters_map,
+                        &mut local_storages,
+                    )
+                    .await;
+                    resp_tx.send(()).expect("failed to done task");
                 }
+                ReplayRequest::Fin => return,
             }
         }
     }
