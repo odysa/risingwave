@@ -22,7 +22,7 @@ use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, ReplayIter, ReplayRead, ReplayStateStore, ReplayWrite, Result,
-    TraceError, TraceReadOptions, TraceSubResp, TraceWriteOptions,
+    TraceError, TraceReadOptions, TraceSubResp, TraceWriteOptions, TracedBytes,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
@@ -50,9 +50,14 @@ impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> HummockR
 impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> ReplayIter
     for HummockReplayIter<I>
 {
-    async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
+    async fn next(&mut self) -> Option<(TracedBytes, TracedBytes)> {
         let key_value: Option<(FullKey<Vec<u8>>, Bytes)> = self.0.next().await.unwrap();
-        key_value.map(|(key, value)| (key.user_key.table_key.to_vec(), value.to_vec()))
+        key_value.map(|(key, value)| {
+            (
+                TracedBytes::from(key.user_key.table_key.to_vec()),
+                TracedBytes::from(value.clone()),
+            )
+        })
     }
 }
 
@@ -77,7 +82,6 @@ impl ReplayRead for GlobalReplayInterface {
         read_options: TraceReadOptions,
     ) -> Result<Box<dyn ReplayIter>> {
         let read_options = from_trace_read_options(read_options);
-
         let iter = self
             .store
             .iter(key_range, epoch, read_options)
@@ -90,15 +94,15 @@ impl ReplayRead for GlobalReplayInterface {
 
     async fn get(
         &self,
-        key: Vec<u8>,
+        key: TracedBytes,
         epoch: u64,
         read_options: TraceReadOptions,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<Option<TracedBytes>> {
         let read_options = from_trace_read_options(read_options);
 
         let value = self.store.get(&key, epoch, read_options).await.unwrap();
 
-        Ok(value.map(|b| b.to_vec()))
+        Ok(value.map(|b| TracedBytes::from(b.clone())))
     }
 }
 
@@ -164,15 +168,15 @@ impl ReplayRead for LocalReplayInterface {
 
     async fn get(
         &self,
-        key: Vec<u8>,
+        key: TracedBytes,
         epoch: u64,
         read_options: TraceReadOptions,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<Option<TracedBytes>> {
         let read_options = from_trace_read_options(read_options);
 
         let value = self.0.get(&key, epoch, read_options).await.unwrap();
 
-        Ok(value.map(|b| b.to_vec()))
+        Ok(value.map(|b| TracedBytes::from(b.clone())))
     }
 }
 
@@ -180,17 +184,17 @@ impl ReplayRead for LocalReplayInterface {
 impl ReplayWrite for LocalReplayInterface {
     async fn ingest(
         &self,
-        mut kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-        mut delete_ranges: Vec<(Vec<u8>, Vec<u8>)>,
+        mut kv_pairs: Vec<(TracedBytes, Option<TracedBytes>)>,
+        mut delete_ranges: Vec<(TracedBytes, TracedBytes)>,
         write_options: TraceWriteOptions,
     ) -> Result<usize> {
         let kv_pairs = kv_pairs
             .drain(..)
             .map(|(key, value)| {
                 (
-                    Bytes::from(key),
+                    key.into(),
                     StorageValue {
-                        user_value: value.map(Bytes::from),
+                        user_value: value.map(Into::into),
                     },
                 )
             })
@@ -198,7 +202,7 @@ impl ReplayWrite for LocalReplayInterface {
 
         let delete_ranges = delete_ranges
             .drain(..)
-            .map(|(left, right)| (Bytes::from(left), Bytes::from(right)))
+            .map(|(left, right)| (left.into(), right.into()))
             .collect();
 
         let write_options = from_trace_write_options(write_options);

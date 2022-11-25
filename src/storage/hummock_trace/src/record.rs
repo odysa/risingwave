@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bincode::error::{DecodeError, EncodeError};
@@ -84,7 +84,6 @@ impl Record {
     }
 }
 
-type TraceValue = Vec<u8>;
 type TableId = u32;
 /// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
@@ -105,7 +104,7 @@ pub enum Operation {
 
     /// Iter operation of Hummock
     Iter {
-        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
         read_options: TraceReadOptions,
     },
@@ -167,6 +166,14 @@ impl Operation {
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct TracedBytes(Bytes);
 
+impl Deref for TracedBytes {
+    type Target = Bytes;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl Encode for TracedBytes {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         Encode::encode(&self.0.as_ref(), encoder)
@@ -196,6 +203,16 @@ impl<'de> bincode::BorrowDecode<'de> for TracedBytes {
 impl From<Vec<u8>> for TracedBytes {
     fn from(value: Vec<u8>) -> Self {
         Self(Bytes::from(value))
+    }
+}
+impl From<Bytes> for TracedBytes {
+    fn from(value: Bytes) -> Self {
+        Self(value)
+    }
+}
+impl Into<Bytes> for TracedBytes {
+    fn into(self) -> Bytes {
+        self.0
     }
 }
 

@@ -79,14 +79,14 @@ mod tests {
 
     use super::*;
     use crate::{
-        MockGlobalReplayInterface, MockLocalReplayInterface, MockTraceReader, OperationResult,
-        Record, StorageType, TraceError, TraceResult, TracedBytes,
+        traced_bytes, MockGlobalReplayInterface, MockLocalReplayInterface, MockTraceReader,
+        OperationResult, Record, StorageType, TraceError, TraceResult,
     };
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_replay() {
         let mut mock_reader = MockTraceReader::new();
-        let get_result = TracedBytes::from(vec![54, 32, 198, 236, 24]);
+        let get_result = traced_bytes![54, 32, 198, 236, 24];
         let ingest_result = 536248723;
         let seal_checkpoint = true;
         let sync_id = 4561245432;
@@ -104,7 +104,7 @@ mod tests {
             (
                 0,
                 Operation::get(
-                    TracedBytes::from(vec![0, 1, 2, 3]),
+                    traced_bytes![0, 1, 2, 3],
                     123,
                     None,
                     true,
@@ -123,10 +123,7 @@ mod tests {
             (
                 3,
                 Operation::ingest(
-                    vec![(
-                        TracedBytes::from(vec![123]),
-                        Some(TracedBytes::from(vec![123])),
-                    )],
+                    vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
                     table_id1,
@@ -145,7 +142,7 @@ mod tests {
             (
                 1,
                 Operation::get(
-                    TracedBytes::from(vec![0, 1, 2, 3]),
+                    traced_bytes![0, 1, 2, 3],
                     123,
                     None,
                     true,
@@ -164,10 +161,7 @@ mod tests {
             (
                 2,
                 Operation::ingest(
-                    vec![(
-                        TracedBytes::from(vec![123]),
-                        Some(TracedBytes::from(vec![123])),
-                    )],
+                    vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
                     4,
                     table_id2,
@@ -186,7 +180,7 @@ mod tests {
             (
                 4,
                 Operation::get(
-                    vec![0, 1, 2, 3],
+                    traced_bytes![0, 1, 2, 3],
                     123,
                     None,
                     true,
@@ -204,7 +198,12 @@ mod tests {
             (4, Operation::Finish),
             (
                 5,
-                Operation::ingest(vec![(vec![123], Some(vec![123]))], vec![], 4, table_id3),
+                Operation::ingest(
+                    vec![(traced_bytes![123], Some(traced_bytes![123]))],
+                    vec![],
+                    4,
+                    table_id3,
+                ),
             ),
             (
                 5,
@@ -254,7 +253,7 @@ mod tests {
             mock_local
                 .expect_get()
                 .times(1)
-                .returning(move |_, _, _| Ok(Some(vec![54, 32, 198, 236, 24])));
+                .returning(move |_, _, _| Ok(Some(traced_bytes![54, 32, 198, 236, 24])));
 
             mock_local
                 .expect_ingest()
