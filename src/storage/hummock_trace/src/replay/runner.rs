@@ -43,21 +43,26 @@ impl<R: TraceReader> HummockReplay<R> {
     ) -> Result<()> {
         let time = Instant::now();
         let mut total_ops: u64 = 0;
-
-        while let Ok(r) = self.reader.read() {
-            match r.op() {
-                Operation::Result(_) => {
-                    worker_scheduler.send_result(r);
-                }
-                Operation::Finish => {
-                    worker_scheduler.wait_finish(r).await;
-                }
-                _ => {
-                    worker_scheduler.schedule(r);
-                    total_ops += 1;
-                    if total_ops % 10000 == 0 {
-                        println!("replayed {} ops", total_ops);
+        loop {
+            match self.reader.read() {
+                Ok(r) => match r.op() {
+                    Operation::Result(_) => {
+                        worker_scheduler.send_result(r);
                     }
+                    Operation::Finish => {
+                        worker_scheduler.wait_finish(r).await;
+                    }
+                    _ => {
+                        worker_scheduler.schedule(r);
+                        total_ops += 1;
+                        if total_ops % 10000 == 0 {
+                            println!("replayed {} ops", total_ops);
+                        }
+                    }
+                },
+                Err(e) => {
+                    eprintln!("{}", e);
+                    break;
                 }
             };
         }
