@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::Write;
 use std::mem::size_of;
 
-use bincode::{config, encode_into_std_write};
+use bincode::{config, encode_to_vec};
 #[cfg(test)]
-use mockall::{automock, mock};
+use mockall::automock;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::record::Record;
 use crate::error::Result;
@@ -25,13 +25,14 @@ use crate::error::Result;
 pub(crate) static MAGIC_BYTES: u32 = 0x484D5452; // HMTR
 
 #[cfg_attr(test, automock)]
+#[async_trait::async_trait]
 pub(crate) trait TraceWriter {
-    fn write(&mut self, record: Record) -> Result<usize>;
-    fn flush(&mut self) -> Result<()>;
-    fn write_all(&mut self, records: Vec<Record>) -> Result<usize> {
+    async fn write(&mut self, record: Record) -> Result<usize>;
+    async fn flush(&mut self) -> Result<()>;
+    async fn write_all(&mut self, records: Vec<Record>) -> Result<usize> {
         let mut total_size = 0;
         for r in records {
-            total_size += self.write(r)?
+            total_size += self.write(r).await?
         }
         Ok(total_size)
     }
@@ -39,82 +40,71 @@ pub(crate) trait TraceWriter {
 
 /// Serializer serializes a record to std write.
 #[cfg_attr(test, automock)]
-pub(crate) trait Serializer<W: Write> {
-    fn serialize(&self, record: Record, buf: &mut W) -> Result<usize>;
+pub(crate) trait Serializer {
+    fn serialize(&self, record: Record) -> Result<Vec<u8>>;
 }
 
+#[derive(Default)]
 pub(crate) struct BincodeSerializer;
 
-impl BincodeSerializer {
-    fn new() -> Self {
-        Self
+impl Serializer for BincodeSerializer {
+    fn serialize(&self, record: Record) -> Result<Vec<u8>> {
+        let bytes = encode_to_vec(record, config::standard())?;
+        Ok(bytes)
     }
 }
 
-impl<W: Write> Serializer<W> for BincodeSerializer {
-    fn serialize(&self, record: Record, writer: &mut W) -> Result<usize> {
-        let size = encode_into_std_write(record, writer, config::standard())?;
-        Ok(size)
-    }
-}
-
-pub(crate) struct TraceWriterImpl<W: Write, S: Serializer<W>> {
+pub(crate) struct TraceWriterImpl<W: AsyncWrite + Unpin, S: Serializer> {
     writer: W,
     serializer: S,
 }
 
-impl<W: Write, S: Serializer<W>> TraceWriterImpl<W, S> {
-    pub(crate) fn new(mut writer: W, serializer: S) -> Result<Self> {
+impl<W: AsyncWrite + Unpin, S: Serializer> TraceWriterImpl<W, S> {
+    pub(crate) async fn new(mut writer: W, serializer: S) -> Result<Self> {
         assert_eq!(
             writer
                 .write(&MAGIC_BYTES.to_be_bytes())
+                .await
                 .expect("failed to write magic bytes"),
             size_of::<u32>()
         );
-
         Ok(Self { writer, serializer })
     }
 }
 
-impl<W: Write> TraceWriterImpl<W, BincodeSerializer> {
-    pub(crate) fn new_bincode(writer: W) -> Result<Self> {
-        let s = BincodeSerializer::new();
-        Self::new(writer, s)
+impl<W: AsyncWrite + Unpin> TraceWriterImpl<W, BincodeSerializer> {
+    pub(crate) async fn new_bincode(writer: W) -> Result<Self> {
+        let s = BincodeSerializer::default();
+        Self::new(writer, s).await
     }
 }
 
-impl<W: Write, S: Serializer<W>> TraceWriter for TraceWriterImpl<W, S> {
-    fn write(&mut self, record: Record) -> Result<usize> {
-        let size = self.serializer.serialize(record, &mut self.writer)?;
+#[async_trait::async_trait]
+impl<W, S> TraceWriter for TraceWriterImpl<W, S>
+where
+    W: AsyncWrite + Unpin + Send,
+    S: Serializer + Send,
+{
+    async fn write(&mut self, record: Record) -> Result<usize> {
+        let buf = self.serializer.serialize(record)?;
+        let size = self.writer.write(&buf).await?;
         Ok(size)
     }
 
-    fn flush(&mut self) -> Result<()> {
-        self.writer.flush()?;
+    async fn flush(&mut self) -> Result<()> {
+        self.writer.flush().await?;
         Ok(())
-    }
-}
-
-impl<W: Write, S: Serializer<W>> Drop for TraceWriterImpl<W, S> {
-    fn drop(&mut self) {
-        self.flush().expect("failed to flush TraceWriterImpl");
     }
 }
 
 #[cfg(test)]
 mod test {
     use bincode::{config, decode_from_slice, encode_to_vec};
+    use bytes::BytesMut;
+    use tokio::io::AsyncReadExt;
 
     use super::*;
     use crate::{Operation, TracedBytes};
-
-    mock! {
-        Write{}
-        impl Write for Write{
-            fn write(&mut self, bytes: &[u8]) -> std::result::Result<usize, std::io::Error>;
-            fn flush(&mut self) -> std::result::Result<(), std::io::Error>;
-        }
-    }
 
     #[test]
     fn test_bincode_serialize() {
@@ -128,20 +118,20 @@ mod test {
             false,
         );
         let expected = Record::new_local_none(0, op);
-        let serializer = BincodeSerializer::new();
-        let mut buf = Vec::new();
-        let write_size = serializer.serialize(expected.clone(), &mut buf).unwrap();
-        assert_eq!(write_size, buf.len());
+        let serializer = BincodeSerializer::default();
 
-        let (actual, read_size) = decode_from_slice(&buf, config::standard()).unwrap();
+        let bytes = serializer.serialize(expected.clone()).unwrap();
 
-        assert_eq!(write_size, read_size);
+        let (actual, read_size) = decode_from_slice(&bytes, config::standard()).unwrap();
+
+        assert_eq!(bytes.len(), read_size);
         assert_eq!(expected, actual);
     }
 
-    #[test]
-    fn test_writer_impl_write() {
-        let mut mock_writer = MockWrite::new();
+    #[tokio::test]
+    async fn test_writer_impl_write() {
+        let mut temp_file = async_tempfile::TempFile::new().await.unwrap();
+
         let key = TracedBytes::from(vec![123]);
         let value = TracedBytes::from(vec![234]);
         let op = Operation::ingest(vec![(key, Some(value))], vec![], 0, 0);
@@ -149,23 +139,19 @@ mod test {
         let r_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
         let r_len = r_bytes.len();
 
-        mock_writer
-            .expect_write()
-            .times(1)
-            .returning(|_| Ok(size_of::<u32>()));
-        mock_writer.expect_write().returning(|b| Ok(b.len()));
+        let mock_serializer = BincodeSerializer::default();
 
-        mock_writer.expect_flush().times(1).returning(|| Ok(()));
+        {
+            let mut writer =
+                TraceWriterImpl::new(temp_file.open_rw().await.unwrap(), mock_serializer)
+                    .await
+                    .unwrap();
 
-        let mut mock_serializer = MockSerializer::new();
+            writer.write(record).await.unwrap();
+        }
 
-        mock_serializer
-            .expect_serialize()
-            .times(1)
-            .returning(move |_, _| Ok(r_len));
-
-        let mut writer = TraceWriterImpl::new(mock_writer, mock_serializer).unwrap();
-
-        writer.write(record).unwrap();
+        let mut buf = BytesMut::new();
+        temp_file.read_buf(&mut buf).await.unwrap();
+        assert_eq!(buf.len(), size_of::<u32>() + r_len);
     }
 }

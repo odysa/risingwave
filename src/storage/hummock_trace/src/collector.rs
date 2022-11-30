@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::env;
-use std::fs::{create_dir_all, OpenOptions};
-use std::io::BufWriter;
+use std::fs::create_dir_all;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 
 use bincode::{Decode, Encode};
 use either::Either;
 use flume::{unbounded, Receiver, Sender};
+use tokio::fs::OpenOptions;
+use tokio::io::BufWriter;
 use tokio::task_local;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
@@ -56,28 +57,29 @@ fn set_use_trace() -> bool {
 
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
-    let path = match env::var(LOG_PATH) {
-        Ok(p) => p,
-        Err(_) => DEFAULT_PATH.to_string(),
-    };
-    let path = Path::new(&path);
+    tokio::spawn(async move {
+        let path = match env::var(LOG_PATH) {
+            Ok(p) => p,
+            Err(_) => DEFAULT_PATH.to_string(),
+        };
+        let path = Path::new(&path);
 
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            create_dir_all(parent).unwrap();
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                create_dir_all(parent).unwrap();
+            }
         }
-    }
-
-    let f = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .create(true)
-        .open(path)
-        .expect("failed to open log file");
-
-    let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
-    let writer = TraceWriterImpl::new_bincode(writer).unwrap();
-    tokio::spawn(GLOBAL_COLLECTOR.run(Box::new(writer)));
+        let f = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(path)
+            .await
+            .expect("failed to open log file");
+        let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
+        let writer = TraceWriterImpl::new_bincode(writer).await.unwrap();
+        GLOBAL_COLLECTOR.run(writer);
+    });
 }
 
 /// `GlobalCollector` collects traced hummock operations.
@@ -93,19 +95,14 @@ impl GlobalCollector {
         Self { tx, rx }
     }
 
-    async fn run(&self, writer: Box<dyn TraceWriter + Send>) {
+    fn run(&self, writer: impl TraceWriter + Send + 'static) {
         let (writer_tx, writer_rx) = unbounded();
 
-        let writer_handle = tokio::spawn(GlobalCollector::start_writer_worker(writer_rx, writer));
+        tokio::spawn(GlobalCollector::start_writer_worker(writer_rx, writer));
 
         let rx = self.rx.clone();
 
-        let collect_handle = tokio::spawn(GlobalCollector::start_collect_worker(rx, writer_tx));
-
-        collect_handle
-            .await
-            .expect("failed to stop collector thread");
-        writer_handle.await.expect("failed to stop writer thread");
+        tokio::spawn(GlobalCollector::start_collect_worker(rx, writer_tx));
     }
 
     async fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
@@ -136,17 +133,21 @@ impl GlobalCollector {
         }
     }
 
-    async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
+    async fn start_writer_worker(
+        rx: Receiver<WriteMsg>,
+        mut writer: impl TraceWriter + Send + 'static,
+    ) {
         loop {
             if let Ok(msg) = rx.recv_async().await {
                 match msg {
                     WriteMsg::Left(records) => {
                         writer
                             .write_all(records)
+                            .await
                             .expect("failed to write the log file");
                     }
                     WriteMsg::Right(()) => {
-                        writer.flush().expect("failed to flush content");
+                        writer.flush().await.expect("failed to flush content");
                         return;
                     }
                 }
@@ -377,11 +378,11 @@ mod tests {
         let mut mock_writer = MockTraceWriter::new();
 
         mock_writer.expect_write_all().returning(|_| Ok(0));
-        mock_writer.expect_flush().times(1).returning(|| Ok(()));
+        mock_writer.expect_flush().returning(|| Ok(()));
         let _collector = collector.clone();
 
         let runner_handle = tokio::spawn(async move {
-            _collector.clone().run(Box::new(mock_writer)).await;
+            _collector.clone().run(mock_writer);
         });
 
         let mut handles = Vec::with_capacity(count as usize);
