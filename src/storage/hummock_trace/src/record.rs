@@ -310,9 +310,12 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
+    use bincode::{decode_from_slice, encode_to_vec};
     use parking_lot::Mutex;
+    use risingwave_pb::common::Status;
 
     use super::*;
+    use crate::traced_bytes;
 
     // test atomic id
     #[tokio::test(flavor = "multi_thread")]
@@ -340,5 +343,29 @@ mod tests {
         for i in 0..count {
             assert!(ids.contains(&i));
         }
+    }
+
+    #[test]
+    fn test_bincode_serialize_traced_bytes() {
+        let expected = Some(traced_bytes![1, 2, 3, 4]);
+        let s = encode_to_vec(expected.clone(), bincode::config::standard()).unwrap();
+        let (actual, _) = decode_from_slice(&s, bincode::config::standard()).unwrap();
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_bincode_serialize_meta_resp() {
+        let expected = TraceSubResp(SubscribeResponse {
+            status: Some(Status {
+                code: 200,
+                message: "Hello World".to_string(),
+            }),
+            operation: 2,
+            version: 435324,
+            info: None,
+        });
+        let s = encode_to_vec(expected.clone(), bincode::config::standard()).unwrap();
+        let (actual, _) = decode_from_slice(&s, bincode::config::standard()).unwrap();
+        assert_eq!(expected, actual);
     }
 }
