@@ -18,10 +18,10 @@ use std::path::Path;
 use std::sync::atomic::AtomicU64;
 
 use bincode::{Decode, Encode};
-use either::Either;
-use flume::{unbounded, Receiver, Sender};
 use tokio::fs::OpenOptions;
 use tokio::io::BufWriter;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::Mutex;
 use tokio::task_local;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
@@ -78,102 +78,62 @@ pub fn init_collector() {
             .expect("failed to open log file");
         let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
         let writer = TraceWriterImpl::new_bincode(writer).await.unwrap();
-        GLOBAL_COLLECTOR.run(writer);
+
+        GlobalCollector::run(writer).await;
     });
 }
 
 /// `GlobalCollector` collects traced hummock operations.
 /// It starts a collector thread and writer thread.
 struct GlobalCollector {
-    tx: Sender<RecordMsg>,
-    rx: Receiver<RecordMsg>,
+    tx: UnboundedSender<RecordMsg>,
+    rx: Mutex<UnboundedReceiver<RecordMsg>>,
 }
 
 impl GlobalCollector {
     fn new() -> Self {
-        let (tx, rx) = unbounded();
-        Self { tx, rx }
-    }
-
-    fn run(&self, writer: impl TraceWriter + Send + 'static) {
-        let (writer_tx, writer_rx) = unbounded();
-
-        tokio::spawn(GlobalCollector::start_writer_worker(writer_rx, writer));
-
-        let rx = self.rx.clone();
-
-        tokio::spawn(GlobalCollector::start_collect_worker(rx, writer_tx));
-    }
-
-    async fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
-        let mut records = Vec::new();
-        loop {
-            if let Ok(message) = rx.recv_async().await {
-                match message {
-                    RecordMsg::Left(record) => {
-                        records.push(record);
-                    }
-                    RecordMsg::Right(()) => {
-                        writer_tx
-                            .send(WriteMsg::Left(records))
-                            .expect("failed to send write req");
-                        writer_tx
-                            .send(WriteMsg::Right(()))
-                            .expect("failed to kill writer thread");
-                        return;
-                    }
-                }
-            }
-            if !records.is_empty() && !rx.is_empty() {
-                writer_tx
-                    .send(WriteMsg::Left(records))
-                    .expect("failed to send write req");
-                records = Vec::new();
-            }
+        let (tx, rx) = unbounded_channel();
+        Self {
+            tx,
+            rx: Mutex::new(rx),
         }
     }
 
-    async fn start_writer_worker(
-        rx: Receiver<WriteMsg>,
-        mut writer: impl TraceWriter + Send + 'static,
-    ) {
-        loop {
-            if let Ok(msg) = rx.recv_async().await {
-                match msg {
-                    WriteMsg::Left(records) => {
+    async fn run(mut writer: impl TraceWriter + Send + 'static) {
+        {
+            let mut rx = GLOBAL_COLLECTOR.rx.lock().await;
+            while let Some(r) = rx.recv().await {
+                match r {
+                    Some(r) => {
                         writer
-                            .write_all(records)
+                            .write(r)
                             .await
-                            .expect("failed to write the log file");
+                            .expect("failed to write trace log file");
                     }
-                    WriteMsg::Right(()) => {
-                        writer.flush().await.expect("failed to flush content");
-                        return;
+                    None => {
+                        break;
                     }
                 }
             }
         }
+        writer.flush().await.expect("failed to flush log file");
     }
 
     fn finish(&self) {
-        self.tx
-            .send(Either::Right(()))
-            .expect("failed to finish collector");
+        self.tx.send(None).expect("failed to finish worker");
     }
 
-    fn tx(&self) -> Sender<RecordMsg> {
+    fn tx(&self) -> UnboundedSender<RecordMsg> {
         self.tx.clone()
-    }
-
-    #[cfg(test)]
-    fn rx(&self) -> Receiver<RecordMsg> {
-        self.rx.clone()
     }
 }
 
 impl Drop for GlobalCollector {
     fn drop(&mut self) {
-        self.finish();
+        // only send when channel is not closed
+        if !self.tx.is_closed() {
+            self.finish();
+        }
     }
 }
 
@@ -183,13 +143,13 @@ impl Drop for GlobalCollector {
 #[must_use = "TraceSpan Lifetime is important"]
 #[derive(Clone)]
 pub struct TraceSpan {
-    tx: Option<Sender<RecordMsg>>,
+    tx: Option<UnboundedSender<RecordMsg>>,
     id: Option<RecordId>,
     storage_type: Option<StorageType>,
 }
 
 impl TraceSpan {
-    pub fn new(tx: Sender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
+    pub fn new(tx: UnboundedSender<RecordMsg>, id: RecordId, storage_type: StorageType) -> Self {
         Self {
             tx: Some(tx),
             id: Some(id),
@@ -200,12 +160,8 @@ impl TraceSpan {
     pub fn send(&self, op: Operation) {
         match &self.tx {
             Some(tx) => {
-                tx.send(Either::Left(Record::new(
-                    self.storage_type(),
-                    self.id(),
-                    op,
-                )))
-                .expect("failed to log record");
+                tx.send(Some(Record::new(self.storage_type(), self.id(), op)))
+                    .expect("failed to log record");
             }
             None => {}
         }
@@ -246,7 +202,7 @@ impl TraceSpan {
 
     #[cfg(test)]
     pub fn new_op(
-        tx: Sender<RecordMsg>,
+        tx: UnboundedSender<RecordMsg>,
         id: RecordId,
         op: Operation,
         storage_type: StorageType,
@@ -263,9 +219,7 @@ impl Drop for TraceSpan {
     }
 }
 
-pub type RecordMsg = Either<Record, ()>;
-pub type WriteMsg = Either<Vec<Record>, ()>;
-
+pub type RecordMsg = Option<Record>;
 pub type ConcurrentId = u64;
 
 #[derive(Clone, Copy, Debug, Encode, Decode, PartialEq, Eq)]
@@ -290,7 +244,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_global_new_span() {
-        let rx = GLOBAL_COLLECTOR.rx();
+        let mut rx = GLOBAL_COLLECTOR.rx.lock().await;
 
         let op1 = Operation::Sync(0);
         let op2 = Operation::Seal(0, false);
@@ -301,28 +255,20 @@ mod tests {
         let _span1 = TraceSpan::new_to_global(op1, StorageType::Global);
         let _span2 = TraceSpan::new_to_global(op2, StorageType::Global);
 
-        let msg1 = rx.recv().unwrap();
-        let msg2 = rx.recv().unwrap();
+        let msg1 = rx.recv().await.unwrap();
+        let msg2 = rx.recv().await.unwrap();
 
-        assert!(rx.is_empty());
-        assert_eq!(msg1, Either::Left(record1));
-        assert_eq!(msg2, Either::Left(record2));
+        assert_eq!(msg1, Some(record1));
+        assert_eq!(msg2, Some(record2));
 
         drop(_span1);
         drop(_span2);
 
-        let msg1 = rx.recv().unwrap();
-        let msg2 = rx.recv().unwrap();
+        let msg1 = rx.recv().await.unwrap();
+        let msg2 = rx.recv().await.unwrap();
 
-        assert!(rx.is_empty());
-        assert_eq!(
-            msg1,
-            Either::Left(Record::new_local_none(0, Operation::Finish))
-        );
-        assert_eq!(
-            msg2,
-            Either::Left(Record::new_local_none(1, Operation::Finish))
-        );
+        assert_eq!(msg1, Some(Record::new_local_none(0, Operation::Finish)));
+        assert_eq!(msg2, Some(Record::new_local_none(1, Operation::Finish)));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -356,14 +302,18 @@ mod tests {
             handle.await.unwrap();
         }
 
-        let rx = collector.rx();
-        assert_eq!(rx.len(), count * 2);
+        let mut rx = collector.rx.lock().await;
+        let mut rx_count = 0;
+        rx.close();
+        while rx.recv().await.is_some() {
+            rx_count += 1;
+        }
+        assert_eq!(count * 2, rx_count);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_collector_run() {
         let count = 5000;
-        let collector = Arc::new(GlobalCollector::new());
         let generator = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
 
         let op = Operation::get(
@@ -377,23 +327,22 @@ mod tests {
         );
         let mut mock_writer = MockTraceWriter::new();
 
-        mock_writer.expect_write_all().returning(|_| Ok(0));
-        mock_writer.expect_flush().returning(|| Ok(()));
-        let _collector = collector.clone();
+        mock_writer
+            .expect_write()
+            .times(count * 2)
+            .returning(|_| Ok(0));
+        mock_writer.expect_flush().times(1).returning(|| Ok(()));
 
-        let runner_handle = tokio::spawn(async move {
-            _collector.clone().run(mock_writer);
-        });
+        let runner_handle = tokio::spawn(GlobalCollector::run(mock_writer));
 
-        let mut handles = Vec::with_capacity(count as usize);
+        let mut handles = Vec::with_capacity(count);
 
         for _ in 0..count {
             let op = op.clone();
-            let collector = collector.clone();
+            let tx = GLOBAL_COLLECTOR.tx();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span =
-                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Local(0));
+                let _span = TraceSpan::new_op(tx, generator.next(), op, StorageType::Local(0));
             });
             handles.push(handle);
         }
@@ -402,7 +351,7 @@ mod tests {
             handle.await.unwrap();
         }
 
-        collector.finish();
+        GLOBAL_COLLECTOR.finish();
 
         runner_handle.await.unwrap();
     }
