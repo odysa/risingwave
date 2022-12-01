@@ -102,17 +102,10 @@ impl GlobalCollector {
     fn run(mut writer: impl TraceWriter + Send + 'static) -> tokio::task::JoinHandle<()> {
         tokio::task::spawn_blocking(move || {
             let mut rx = GLOBAL_COLLECTOR.rx.lock().take().unwrap();
-            while let Some(r) = rx.blocking_recv() {
-                match r {
-                    Some(r) => {
-                        writer.write(r).expect("failed to write hummock trace");
-                    }
-                    None => {
-                        writer.flush().expect("failed to flush hummock trace");
-                        break;
-                    }
-                }
+            while let Some(Some(r)) = rx.blocking_recv() {
+                writer.write(r).expect("failed to write hummock trace");
             }
+            writer.flush().expect("failed to flush hummock trace");
         })
     }
 
