@@ -17,6 +17,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
+use std::sync::LazyLock;
 
 use bincode::{Decode, Encode};
 use parking_lot::Mutex;
@@ -31,13 +32,12 @@ use crate::{
     UniqueIdGenerator,
 };
 
-// create a global singleton of collector as well as record id generator
-lazy_static! {
-    static ref GLOBAL_COLLECTOR: GlobalCollector = GlobalCollector::new();
-    static ref GLOBAL_RECORD_ID: RecordIdGenerator = UniqueIdGenerator::new(AtomicU64::new(0));
-    static ref SHOULD_USE_TRACE: bool = set_use_trace();
-    pub static ref CONCURRENT_ID: ConcurrentIdGenerator = UniqueIdGenerator::new(AtomicU64::new(0));
-}
+static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
+static GLOBAL_RECORD_ID: LazyLock<RecordIdGenerator> =
+    LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
+static SHOULD_USE_TRACE: LazyLock<bool> = LazyLock::new(set_use_trace);
+pub static CONCURRENT_ID: LazyLock<ConcurrentIdGenerator> =
+    LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
 
 const USE_TRACE: &str = "USE_HM_TRACE";
 const LOG_PATH: &str = "HM_TRACE_PATH";
