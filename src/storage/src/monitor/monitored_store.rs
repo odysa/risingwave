@@ -59,15 +59,6 @@ impl<S> MonitoredStateStore<S> {
             stats,
         }
     }
-
-    fn new_local(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        #[cfg(hm_trace)]
-        let inner = TracedStateStore::new_local(inner);
-        Self {
-            inner: Box::new(inner),
-            stats,
-        }
-    }
 }
 #[cfg(not(hm_trace))]
 type MonitoredIterInnerType<I> = I;
@@ -251,7 +242,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
         async move {
-            MonitoredStateStore::new_local(self.inner.new_local(table_id).await, self.stats.clone())
+            MonitoredStateStore {
+                inner: Box::new(self.inner.new_local(table_id).await),
+                stats: self.stats.clone(),
+            }
         }
     }
 }
