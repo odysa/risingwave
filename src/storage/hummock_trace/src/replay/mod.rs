@@ -49,7 +49,7 @@ pub trait GlobalReplay: ReplayRead + ReplayStateStore + Send + Sync {}
 pub trait ReplayRead {
     async fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         epoch: u64,
         read_options: TraceReadOptions,
     ) -> Result<Box<dyn ReplayIter>>;
@@ -95,7 +95,7 @@ mock! {
     impl ReplayRead for GlobalReplayInterface{
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
             epoch: u64,
             read_options: TraceReadOptions,
         ) -> Result<Box<dyn ReplayIter>>;
@@ -125,6 +125,7 @@ mock! {
     impl GlobalReplay for GlobalReplayInterface{}
 }
 
+// define mock trait for local replay interfaces
 #[cfg(test)]
 mock! {
     pub LocalReplayInterface{}
@@ -132,7 +133,7 @@ mock! {
     impl ReplayRead for LocalReplayInterface{
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
             epoch: u64,
             read_options: TraceReadOptions,
         ) -> Result<Box<dyn ReplayIter>>;
