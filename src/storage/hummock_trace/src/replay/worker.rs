@@ -37,13 +37,13 @@ pub trait ReplayWorkerScheduler {
     async fn shutdown(self);
 }
 
-pub(crate) struct WorkerScheduler {
+pub(crate) struct WorkerScheduler<G: GlobalReplay> {
     workers: HashMap<WorkerId, WorkerHandler>,
-    replay: Arc<Box<dyn GlobalReplay>>,
+    replay: Arc<G>,
 }
 
-impl WorkerScheduler {
-    pub(crate) fn new(replay: Arc<Box<dyn GlobalReplay>>) -> Self {
+impl<G: GlobalReplay> WorkerScheduler<G> {
+    pub(crate) fn new(replay: Arc<G>) -> Self {
         WorkerScheduler {
             workers: HashMap::new(),
             replay,
@@ -59,7 +59,7 @@ impl WorkerScheduler {
 }
 
 #[async_trait::async_trait]
-impl ReplayWorkerScheduler for WorkerScheduler {
+impl<G: GlobalReplay + 'static> ReplayWorkerScheduler for WorkerScheduler<G> {
     fn schedule(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
         let handler = self
@@ -101,7 +101,7 @@ impl ReplayWorkerScheduler for WorkerScheduler {
 struct ReplayWorker {}
 
 impl ReplayWorker {
-    fn spawn(replay: Arc<Box<dyn GlobalReplay>>) -> WorkerHandler {
+    fn spawn(replay: Arc<impl GlobalReplay + 'static>) -> WorkerHandler {
         let (req_tx, req_rx) = unbounded_channel();
         let (resp_tx, resp_rx) = unbounded_channel();
         let (res_tx, res_rx) = unbounded_channel();
@@ -120,7 +120,7 @@ impl ReplayWorker {
         mut req_rx: UnboundedReceiver<ReplayRequest>,
         mut res_rx: UnboundedReceiver<OperationResult>,
         resp_tx: UnboundedSender<WorkerResponse>,
-        replay: Arc<Box<dyn GlobalReplay>>,
+        replay: Arc<impl GlobalReplay>,
     ) {
         let mut iters_map = HashMap::new();
         let mut local_storages = LocalStorages::new();
@@ -144,7 +144,7 @@ impl ReplayWorker {
 
     async fn handle_record(
         record: Record,
-        replay: &Arc<Box<dyn GlobalReplay>>,
+        replay: &Arc<impl GlobalReplay>,
         res_rx: &mut UnboundedReceiver<OperationResult>,
         iters_map: &mut HashMap<RecordId, Box<dyn ReplayIter>>,
         local_storages: &mut LocalStorages,
@@ -296,7 +296,7 @@ impl LocalStorages {
     async fn get_or_insert(
         &mut self,
         table_id: u32,
-        replay: &Arc<Box<dyn GlobalReplay>>,
+        replay: &Arc<impl GlobalReplay>,
     ) -> &mut Box<dyn LocalReplay> {
         match self.storages.entry(table_id) {
             Entry::Occupied(s) => s.into_mut(),
@@ -390,7 +390,7 @@ mod tests {
             Box::new(mock_local)
         });
 
-        let replay: Arc<Box<dyn GlobalReplay>> = Arc::new(Box::new(mock_replay));
+        let replay = Arc::new(mock_replay);
         res_tx
             .send(OperationResult::Get(TraceResult::Ok(Some(traced_bytes![
                 120
