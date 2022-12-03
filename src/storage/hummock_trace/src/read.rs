@@ -104,8 +104,8 @@ mod test {
 
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
-        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TraceSubResp,
-        TracedBytes, MAGIC_BYTES,
+        traced_bytes, BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record,
+        TraceSubResp, TracedBytes, MAGIC_BYTES,
     };
 
     mock! {
@@ -146,7 +146,7 @@ mod test {
     fn test_bincode_deserialize() {
         let deserializer = BincodeDeserializer::new();
         let op = Operation::get(
-            TracedBytes::from(vec![5, 5, 15, 6]),
+            traced_bytes![5, 5, 15, 6],
             7564,
             None,
             true,

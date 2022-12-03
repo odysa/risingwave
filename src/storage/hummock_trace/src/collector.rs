@@ -216,7 +216,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{MockTraceWriter, TracedBytes};
+    use crate::{traced_bytes, MockTraceWriter};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
@@ -231,7 +231,7 @@ mod tests {
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
                 let op = Operation::get(
-                    TracedBytes::from(vec![i as u8]),
+                    traced_bytes![i as u8],
                     123,
                     None,
                     true,
@@ -264,7 +264,7 @@ mod tests {
         let generator = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
 
         let op = Operation::get(
-            TracedBytes::from(vec![74, 56, 43, 67]),
+            traced_bytes![74, 56, 43, 67],
             256,
             None,
             true,
