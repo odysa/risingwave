@@ -227,10 +227,5 @@ where
 }
 
 pub fn get_concurrent_id() -> ConcurrentId {
-    #[cfg(all(not(madsim), hm_trace))]
-    {
-        LOCAL_ID.get()
-    }
-    #[cfg(any(madsim, not(hm_trace)))]
-    0
+    LOCAL_ID.get()
 }
