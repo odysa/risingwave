@@ -59,7 +59,7 @@ fn set_use_trace() -> bool {
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
     tokio::spawn(async move {
-        let path = env::var(LOG_PATH).unwrap_or(DEFAULT_PATH.to_string());
+        let path = env::var(LOG_PATH).unwrap_or_else(|_| DEFAULT_PATH.to_string());
         let path = Path::new(&path);
         tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
 
@@ -174,7 +174,7 @@ impl TraceSpan {
     }
 
     #[cfg(test)]
-    pub fn new_op(
+    pub fn new_with_op(
         tx: Sender<RecordMsg>,
         id: RecordId,
         op: Operation,
@@ -236,8 +236,12 @@ mod tests {
                     123,
                     false,
                 );
-                let _span =
-                    TraceSpan::new_op(collector.tx(), generator.next(), op, StorageType::Global);
+                let _span = TraceSpan::new_with_op(
+                    collector.tx(),
+                    generator.next(),
+                    op,
+                    StorageType::Global,
+                );
             });
             handles.push(handle);
         }
@@ -286,7 +290,7 @@ mod tests {
             let tx = GLOBAL_COLLECTOR.tx();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span = TraceSpan::new_op(tx, generator.next(), op, StorageType::Local(0));
+                let _span = TraceSpan::new_with_op(tx, generator.next(), op, StorageType::Local(0));
             });
             handles.push(handle);
         }
