@@ -59,10 +59,7 @@ fn set_use_trace() -> bool {
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
     tokio::spawn(async move {
-        let path = match env::var(LOG_PATH) {
-            Ok(p) => p,
-            Err(_) => DEFAULT_PATH.to_string(),
-        };
+        let path = env::var(LOG_PATH).unwrap_or(DEFAULT_PATH.to_string());
         let path = Path::new(&path);
 
         if let Some(parent) = path.parent() {
@@ -75,7 +72,6 @@ pub fn init_collector() {
             .truncate(true)
             .create(true)
             .open(path)
-            // .await
             .expect("failed to open log file");
         let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
         let writer = TraceWriterImpl::new_bincode(writer).unwrap();
@@ -112,7 +108,7 @@ impl GlobalCollector {
     fn finish(&self) {
         self.tx.send(None).expect("failed to finish worker");
     }
-
+  
     fn tx(&self) -> Sender<RecordMsg> {
         self.tx.clone()
     }
