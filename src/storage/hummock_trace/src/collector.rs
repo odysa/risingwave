@@ -49,10 +49,9 @@ pub fn should_use_trace() -> bool {
 }
 
 fn set_use_trace() -> bool {
-    if let Ok(v) = std::env::var(USE_TRACE) {
-        v.parse().unwrap()
-    } else {
-        false
+    match std::env::var(USE_TRACE) {
+        Ok(v) => v.parse().unwrap_or(false),
+        Err(_) => false,
     }
 }
 
@@ -302,5 +301,20 @@ mod tests {
         GLOBAL_COLLECTOR.finish();
 
         runner_handle.await.unwrap();
+    }
+
+    #[test]
+    fn test_set_use_trace() {
+        std::env::remove_var(USE_TRACE);
+        assert_eq!(set_use_trace(), false);
+
+        std::env::set_var(USE_TRACE, "true");
+        assert_eq!(set_use_trace(), true);
+
+        std::env::set_var(USE_TRACE, "false");
+        assert_eq!(set_use_trace(), false);
+
+        std::env::set_var(USE_TRACE, "invalid");
+        assert_eq!(set_use_trace(), false);
     }
 }
