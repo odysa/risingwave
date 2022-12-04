@@ -30,11 +30,7 @@ type ReplayGroup = Record;
 
 type WorkerResponse = ();
 
-#[derive(Debug)]
-pub(crate) enum ReplayRequest {
-    Task(ReplayGroup),
-    Fin,
-}
+pub(crate) type ReplayRequest = Option<ReplayGroup>;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub(crate) enum WorkerId {

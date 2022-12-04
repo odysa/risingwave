@@ -63,13 +63,17 @@ pub struct TraceReaderImpl<R: Read, D: Deserializer<R>> {
 
 impl<R: Read, D: Deserializer<R>> TraceReaderImpl<R, D> {
     pub fn new(mut reader: R, deserializer: D) -> Result<Self> {
-        let flag = reader.read_u32::<BigEndian>()?;
-        if flag != MAGIC_BYTES {
+        // Read the 32-bit unsigned integer from the reader using the BigEndian byte order.
+        let magic_bytes = reader.read_u32::<BigEndian>()?;
+
+        // Check if the magic bytes match the expected value.
+        if magic_bytes != MAGIC_BYTES {
             Err(TraceError::MagicBytes {
                 expected: MAGIC_BYTES,
-                found: flag,
+                found: magic_bytes,
             })
         } else {
+            // Return the TraceReaderImpl instance containing the reader and deserializer.
             Ok(Self {
                 reader,
                 deserializer,

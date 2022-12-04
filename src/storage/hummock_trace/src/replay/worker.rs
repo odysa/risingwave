@@ -67,22 +67,33 @@ impl<G: GlobalReplay + 'static> ReplayWorkerScheduler for WorkerScheduler<G> {
             .entry(worker_id)
             .or_insert_with(|| ReplayWorker::spawn(self.replay.clone()));
 
-        handler.replay(ReplayRequest::Task(record));
+        handler.replay(Some(record));
     }
 
     fn send_result(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
-        if let Operation::Result(trace_result) = record.2 {
-            if let Some(handler) = self.workers.get_mut(&worker_id) {
-                handler.send_result(trace_result);
-            }
+
+        // Check if the worker with the given ID exists in the workers map and the record contains a
+        // Result operation.
+        if let (Some(handler), Operation::Result(trace_result)) =
+            (self.workers.get_mut(&worker_id), record.2)
+        {
+            // If the worker exists and the record contains a Result operation, send the result to
+            // the worker.
+            handler.send_result(trace_result);
         }
     }
 
     async fn wait_finish(&mut self, record: Record) {
         let worker_id = self.allocate_worker_id(&record);
+
+        // Check if the worker with the given ID exists in the workers map.
         if let Some(handler) = self.workers.get_mut(&worker_id) {
+            // If the worker exists, wait for it to finish executing.
             handler.wait().await;
+
+            // If the worker is a one-shot worker, remove it from the workers map and call its
+            // finish method.
             if let WorkerId::OneShot(_) = worker_id {
                 let handler = self.workers.remove(&worker_id).unwrap();
                 handler.finish();
@@ -91,7 +102,8 @@ impl<G: GlobalReplay + 'static> ReplayWorkerScheduler for WorkerScheduler<G> {
     }
 
     async fn shutdown(self) {
-        for handler in self.workers.into_values() {
+        // Iterate over the workers map, calling the finish and join methods on each worker.
+        for (_, handler) in self.workers {
             handler.finish();
             handler.join().await;
         }
@@ -124,21 +136,16 @@ impl ReplayWorker {
     ) {
         let mut iters_map = HashMap::new();
         let mut local_storages = LocalStorages::new();
-        while let Some(msg) = req_rx.recv().await {
-            match msg {
-                ReplayRequest::Task(record) => {
-                    Self::handle_record(
-                        record,
-                        &replay,
-                        &mut res_rx,
-                        &mut iters_map,
-                        &mut local_storages,
-                    )
-                    .await;
-                    resp_tx.send(()).expect("failed to done task");
-                }
-                ReplayRequest::Fin => return,
-            }
+        while let Some(Some(record)) = req_rx.recv().await {
+            Self::handle_record(
+                record,
+                &replay,
+                &mut res_rx,
+                &mut iters_map,
+                &mut local_storages,
+            )
+            .await;
+            resp_tx.send(()).expect("failed to done task");
         }
     }
 
@@ -254,7 +261,7 @@ impl WorkerHandler {
     }
 
     fn finish(&self) {
-        self.send_replay_req(ReplayRequest::Fin);
+        self.send_replay_req(None);
     }
 
     fn replay(&mut self, req: ReplayRequest) {
@@ -450,5 +457,58 @@ mod tests {
 
         assert_eq!(local_storages.len(), 2);
         assert_eq!(iters_map.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_worker_scheduler() {
+        // Create a mock GlobalReplay and a ReplayWorkerScheduler that uses the mock GlobalReplay.
+        let mut mock_replay = MockGlobalReplayInterface::default();
+        let record_id = 29053;
+        let key = traced_bytes![1];
+        let epoch = 2596;
+        let read_options = TraceReadOptions {
+            prefix_hint: None,
+            ignore_range_tombstone: false,
+            check_bloom_filter: false,
+            table_id: 1,
+            retention_seconds: None,
+        };
+
+        let res_bytes = traced_bytes![58, 54, 35];
+
+        mock_replay
+            .expect_get()
+            .with(
+                predicate::eq(key.clone()),
+                predicate::eq(epoch),
+                predicate::eq(read_options.clone()),
+            )
+            .returning(move |_, _, _| Ok(Some(traced_bytes![58, 54, 35])));
+
+        let mut scheduler = WorkerScheduler::new(Arc::new(mock_replay));
+        // Schedule a record for replay.
+        let record = Record(
+            StorageType::Global,
+            record_id,
+            Operation::Get {
+                key,
+                epoch,
+                read_options,
+            },
+        );
+        scheduler.schedule(record);
+
+        let result = Record(
+            StorageType::Global,
+            record_id,
+            Operation::Result(OperationResult::Get(TraceResult::Ok(Some(res_bytes)))),
+        );
+
+        scheduler.send_result(result);
+
+        let fin = Record(StorageType::Global, record_id, Operation::Finish);
+        scheduler.wait_finish(fin).await;
+
+        scheduler.shutdown().await;
     }
 }

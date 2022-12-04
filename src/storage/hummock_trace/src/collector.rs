@@ -108,7 +108,7 @@ impl GlobalCollector {
     fn finish(&self) {
         self.tx.send(None).expect("failed to finish worker");
     }
-  
+
     fn tx(&self) -> Sender<RecordMsg> {
         self.tx.clone()
     }
