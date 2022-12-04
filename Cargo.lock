@@ -5513,6 +5513,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_pb",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

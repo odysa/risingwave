@@ -15,6 +15,7 @@ risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
+tracing = "0.1"
 
 [dev-dependencies]
 itertools = "0.10.5"

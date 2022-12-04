@@ -61,6 +61,7 @@ pub fn init_collector() {
     tokio::spawn(async move {
         let path = env::var(LOG_PATH).unwrap_or(DEFAULT_PATH.to_string());
         let path = Path::new(&path);
+        tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
 
         if let Some(parent) = path.parent() {
             if !parent.exists() {
