@@ -41,13 +41,8 @@ pub trait Deserializer<R: Read> {
 }
 
 /// Decodes bincode format serialized data
+#[derive(Default)]
 pub struct BincodeDeserializer;
-
-impl BincodeDeserializer {
-    fn new() -> Self {
-        Self
-    }
-}
 
 impl<R: Read> Deserializer<R> for BincodeDeserializer {
     fn deserialize(&self, reader: &mut R) -> Result<Record> {
@@ -84,7 +79,7 @@ impl<R: Read, D: Deserializer<R>> TraceReaderImpl<R, D> {
 
 impl<R: Read> TraceReaderImpl<R, BincodeDeserializer> {
     pub fn new_bincode(reader: R) -> Result<Self> {
-        let deserializer = BincodeDeserializer::new();
+        let deserializer = BincodeDeserializer::default();
         Self::try_new(reader, deserializer)
     }
 }
@@ -121,7 +116,7 @@ mod test {
 
     #[test]
     fn test_bincode_deserialize() {
-        let deserializer = BincodeDeserializer::new();
+        let deserializer = BincodeDeserializer::default();
         let op = Operation::get(
             traced_bytes![5, 5, 15, 6],
             7564,
@@ -146,7 +141,7 @@ mod test {
     }
     #[test]
     fn test_bincode_serialize_resp() {
-        let deserializer = BincodeDeserializer::new();
+        let deserializer = BincodeDeserializer::default();
         let resp = TraceSubResp(SubscribeResponse {
             status: Some(Status {
                 code: 0,
@@ -186,7 +181,7 @@ mod test {
         }
 
         buf.set_position(0);
-        let deserializer = BincodeDeserializer::new();
+        let deserializer = BincodeDeserializer::default();
 
         for expected in records {
             let actual = deserializer.deserialize(&mut buf).unwrap();
