@@ -35,7 +35,7 @@ use crate::{
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
 static GLOBAL_RECORD_ID: LazyLock<RecordIdGenerator> =
     LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
-static SHOULD_USE_TRACE: LazyLock<bool> = LazyLock::new(set_use_trace);
+static SHOULD_USE_TRACE: LazyLock<bool> = LazyLock::new(set_should_use_trace);
 pub static CONCURRENT_ID: LazyLock<ConcurrentIdGenerator> =
     LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
 
@@ -48,7 +48,7 @@ pub fn should_use_trace() -> bool {
     *SHOULD_USE_TRACE
 }
 
-fn set_use_trace() -> bool {
+fn set_should_use_trace() -> bool {
     match std::env::var(USE_TRACE) {
         Ok(v) => v.parse().unwrap_or(false),
         Err(_) => false,
@@ -74,7 +74,7 @@ pub fn init_collector() {
             .open(path)
             .expect("failed to open log file");
         let writer = BufWriter::with_capacity(WRITER_BUFFER_SIZE, f);
-        let writer = TraceWriterImpl::new_bincode(writer).unwrap();
+        let writer = TraceWriterImpl::try_new_bincode(writer).unwrap();
         GlobalCollector::run(writer);
     });
 }
@@ -306,15 +306,22 @@ mod tests {
     #[test]
     fn test_set_use_trace() {
         std::env::remove_var(USE_TRACE);
-        assert_eq!(set_use_trace(), false);
+        assert!(!set_should_use_trace());
 
         std::env::set_var(USE_TRACE, "true");
-        assert_eq!(set_use_trace(), true);
+        assert!(set_should_use_trace());
 
         std::env::set_var(USE_TRACE, "false");
-        assert_eq!(set_use_trace(), false);
+        assert!(!set_should_use_trace());
 
         std::env::set_var(USE_TRACE, "invalid");
-        assert_eq!(set_use_trace(), false);
+        assert!(!set_should_use_trace());
+    }
+
+    #[test]
+    fn test_should_use_trace() {
+        std::env::set_var(USE_TRACE, "true");
+        assert!(should_use_trace());
+        assert!(set_should_use_trace());
     }
 }
