@@ -97,8 +97,8 @@ impl ManagedBarrierState {
         if to_notify {
             while let Some((
                 _,
-                &BarrierState {
-                    inner: ref barrier_inner,
+                BarrierState {
+                    inner: barrier_inner,
                     ..
                 },
             )) = self.epoch_barrier_state_map.first_key_value()
@@ -153,6 +153,7 @@ impl ManagedBarrierState {
 
     /// Clear and reset all states.
     pub(crate) fn clear_all_states(&mut self) {
+        tracing::debug!("clear all states in local barrier manager");
         self.epoch_barrier_state_map.clear();
         self.create_mview_progress.clear();
         self.failure_actors.clear();

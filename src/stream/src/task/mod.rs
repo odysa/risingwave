@@ -22,7 +22,6 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 
-use crate::cache::{LruManager, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
 
@@ -80,7 +79,7 @@ pub struct SharedContext {
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 
-    pub(crate) lru_manager: Option<LruManagerRef>,
+    pub(crate) config: StreamingConfig,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -92,28 +91,14 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        state_store: StateStoreImpl,
-        config: &StreamingConfig,
-        enable_managed_cache: bool,
-    ) -> Self {
-        let create_lru_manager = || {
-            let mgr = LruManager::new(
-                config.total_memory_available_bytes,
-                config.barrier_interval_ms,
-            );
-            // Run a background memory monitor
-            tokio::spawn(mgr.clone().run());
-            mgr
-        };
+    pub fn new(addr: HostAddr, state_store: StateStoreImpl, config: &StreamingConfig) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            lru_manager: enable_managed_cache.then(create_lru_manager),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
+            config: config.clone(),
         }
     }
 
@@ -127,7 +112,7 @@ impl SharedContext {
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
                 StateStoreImpl::for_test(),
             ))),
-            lru_manager: None,
+            config: StreamingConfig::default(),
         }
     }
 
@@ -162,7 +147,10 @@ impl SharedContext {
 
     #[inline]
     pub fn add_channel_pairs(&self, ids: UpDownActorIds) {
-        let (tx, rx) = permit::channel();
+        let (tx, rx) = permit::channel(
+            self.config.developer.stream_exchange_initial_permits,
+            self.config.developer.stream_exchange_batched_permits,
+        );
         assert!(
             self.lock_channel_map()
                 .insert(ids, (Some(tx), Some(rx)))

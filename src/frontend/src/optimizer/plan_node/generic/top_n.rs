@@ -19,8 +19,8 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Order;
-use crate::session::OptimizerContextRef;
 use crate::TableCatalog;
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -45,7 +45,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
@@ -58,27 +58,32 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         // does a prefix scanning with the group key, we can fetch the data in the
         // desired order.
         self.group_key.iter().for_each(|&idx| {
-            internal_table_catalog_builder.add_order_column(idx, OrderType::Ascending);
+            internal_table_catalog_builder.add_order_column(idx, OrderType::Ascending, true);
             order_cols.insert(idx);
         });
 
         field_order.iter().for_each(|field_order| {
             if !order_cols.contains(&field_order.index) {
-                internal_table_catalog_builder
-                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
+                internal_table_catalog_builder.add_order_column(
+                    field_order.index,
+                    OrderType::from(field_order.direct),
+                    false,
+                );
                 order_cols.insert(field_order.index);
             }
         });
 
         pk_indices.iter().for_each(|idx| {
             if !order_cols.contains(idx) {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, true);
                 order_cols.insert(*idx);
             }
         });
         if let Some(vnode_col_idx) = vnode_col_idx {
             internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
         }
+
+        internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
         internal_table_catalog_builder
             .build(self.input.distribution().dist_column_indices().to_vec())
     }

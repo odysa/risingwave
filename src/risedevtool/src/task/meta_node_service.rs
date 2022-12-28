@@ -52,10 +52,13 @@ impl MetaNodeService {
                 config.listen_address, config.dashboard_port
             ));
 
-        cmd.arg("--prometheus-host").arg(format!(
-            "{}:{}",
-            config.listen_address, config.exporter_port
-        ));
+        cmd.arg("--prometheus-host")
+            .arg(format!(
+                "{}:{}",
+                config.listen_address, config.exporter_port
+            ))
+            .arg("--connector-rpc-endpoint")
+            .arg(&config.connector_rpc_endpoint);
 
         match config.provide_prometheus.as_ref().unwrap().as_slice() {
             [] => {}
@@ -84,27 +87,6 @@ impl MetaNodeService {
                     eprintln!("WARN: more than 1 etcd instance is detected, only using the first one for meta node.");
                 }
             }
-        }
-
-        if config.unsafe_disable_recovery {
-            cmd.arg("--disable-recovery");
-        }
-
-        if let Some(sec) = config.max_idle_secs_to_exit {
-            if sec > 0 {
-                cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
-            }
-        }
-
-        cmd.arg("--max-heartbeat-interval-secs")
-            .arg(format!("{}", config.max_heartbeat_interval_secs));
-
-        if config.enable_compaction_deterministic {
-            cmd.arg("--enable-compaction-deterministic");
-        }
-
-        if config.enable_committed_sst_sanity_check {
-            cmd.arg("--enable-committed-sst-sanity-check");
         }
 
         Ok(())

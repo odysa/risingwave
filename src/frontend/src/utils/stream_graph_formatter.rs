@@ -96,7 +96,7 @@ impl StreamGraphFormatter {
             tb.pk,
             tb.value_indices,
             tb.distribution_key,
-            if let Some(vnode_col_idx) = tb.vnode_col_idx {
+            if let Some(vnode_col_idx) = tb.vnode_col_index {
                 format!(", vnode column idx: {}", vnode_col_idx)
             } else {
                 "".to_string()
@@ -142,10 +142,12 @@ impl StreamGraphFormatter {
         writeln!(f, "{}{}", " ".repeat(level * 2), one_line_explain)?;
         let explain_table_oneline =
             match node.get_node_body().unwrap() {
-                stream_node::NodeBody::Source(node) => Some(format!(
-                    "source state table: {}",
-                    self.add_table(node.get_state_table().unwrap())
-                )),
+                stream_node::NodeBody::Source(node) => node.source_inner.as_ref().map(|source| {
+                    format!(
+                        "source state table: {}",
+                        self.add_table(source.get_state_table().unwrap())
+                    )
+                }),
                 stream_node::NodeBody::Materialize(node) => Some(format!(
                     "materialized table: {}",
                     self.add_table(node.get_table().unwrap())

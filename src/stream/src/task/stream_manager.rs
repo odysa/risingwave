@@ -16,6 +16,7 @@ use core::time::Duration;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Write;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -53,6 +54,8 @@ pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
 
 pub type ActorHandle = JoinHandle<()>;
 
+pub type AtomicU64RefOpt = Option<Arc<AtomicU64>>;
+
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
     runtime: &'static tokio::runtime::Runtime,
@@ -81,6 +84,9 @@ pub struct LocalStreamManagerCore {
 
     /// Manages the stack traces of all actors.
     stack_trace_manager: Option<StackTraceManager<ActorId>>,
+
+    /// Watermark epoch number.
+    watermark_epoch: Option<Arc<AtomicU64>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -157,7 +163,6 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        enable_managed_cache: bool,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -165,7 +170,6 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             async_stack_trace_config,
-            enable_managed_cache,
         ))
     }
 
@@ -236,7 +240,7 @@ impl LocalStreamManager {
     pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
         let complete_receiver = {
             let mut barrier_manager = self.context.lock_barrier_manager();
-            barrier_manager.remove_collect_rx(epoch)
+            barrier_manager.remove_collect_rx(epoch)?
         };
         // Wait for all actors finishing this barrier.
         let result = complete_receiver
@@ -293,7 +297,7 @@ impl LocalStreamManager {
             .barrier_inflight_latency
             .start_timer();
         barrier_manager.send_barrier(barrier, empty(), empty(), Some(timer))?;
-        barrier_manager.remove_collect_rx(barrier.epoch.prev);
+        barrier_manager.remove_collect_rx(barrier.epoch.prev)?;
         Ok(())
     }
 
@@ -308,10 +312,10 @@ impl LocalStreamManager {
 
     /// Force stop all actors on this worker.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
+        self.core.lock().await.drop_all_actors();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_senders_and_collect_rx();
-        self.core.lock().await.drop_all_actors();
 
         Ok(())
     }
@@ -361,6 +365,13 @@ impl LocalStreamManager {
         let core = self.core.lock().await;
         core.config.clone()
     }
+
+    /// After memory manager is created, it will store the watermark epoch in stream manager, so
+    /// stream executor can get it to build managed cache.
+    pub async fn set_watermark_epoch(&self, watermark_epoch: Option<Arc<AtomicU64>>) {
+        let mut guard = self.core.lock().await;
+        guard.watermark_epoch = watermark_epoch;
+    }
 }
 
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
@@ -378,9 +389,8 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        enable_managed_cache: bool,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone(), &config, enable_managed_cache);
+        let context = SharedContext::new(addr, state_store.clone(), &config);
         Self::new_inner(
             state_store,
             context,
@@ -420,6 +430,7 @@ impl LocalStreamManagerCore {
             streaming_metrics,
             config,
             stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
+            watermark_epoch: None,
         }
     }
 
@@ -632,6 +643,9 @@ impl LocalStreamManagerCore {
 
             let monitor = tokio_metrics::TaskMonitor::new();
 
+            let metrics = self.streaming_metrics.clone();
+            let actor_id_str = actor_id.to_string();
+
             let handle = {
                 let context = self.context.clone();
                 let actor = async move {
@@ -649,7 +663,17 @@ impl LocalStreamManagerCore {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                self.runtime.spawn(instrumented)
+                let allocation_stated = task_stats_alloc::allocation_stat(
+                    instrumented,
+                    Duration::from_millis(1000),
+                    move |bytes| {
+                        metrics
+                            .actor_memory_usage
+                            .with_label_values(&[&actor_id_str])
+                            .set(bytes as i64)
+                    },
+                );
+                self.runtime.spawn(allocation_stated)
             };
             self.handles.insert(actor_id, handle);
 
@@ -817,6 +841,11 @@ impl LocalStreamManagerCore {
             }
         }
         Ok(())
+    }
+
+    /// When executor need to create cache, it will call this needs the watermark epoch for evict.
+    pub fn get_watermark_epoch(&self) -> AtomicU64RefOpt {
+        self.watermark_epoch.clone()
     }
 }
 
