@@ -18,12 +18,10 @@ use bytes::Bytes;
 use futures::{Future, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, new_global_span, send_result, should_use_trace, trace_result, ConcurrentId,
-    Operation, OperationResult, StorageType, TraceReadOptions, TraceResult, TraceSpan, TracedBytes,
-    LOCAL_ID,
+    init_collector, new_global_span, send_result, should_use_trace, ConcurrentId, Operation,
+    OperationResult, StorageType, TraceReadOptions, TraceResult, TraceSpan, TracedBytes, LOCAL_ID,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -33,7 +31,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type, StateStore, StateStoreIter,
+    define_state_store_write_associated_type, StateStore,
 };
 
 #[derive(Clone)]
@@ -117,7 +115,12 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         async move {
             let span = new_global_span!(Operation::Sync(epoch), self.storage_type);
             let sync_result = self.inner.sync(epoch).await;
-            trace_result!(SYNC, span, sync_result);
+            send_result!(
+                span,
+                OperationResult::Sync(TraceResult::from(
+                    sync_result.as_ref().map(|res| res.sync_size.clone())
+                ))
+            );
             sync_result
         }
     }
@@ -241,7 +244,11 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
                 .inner
                 .ingest_batch(kv_pairs, delete_ranges, write_options)
                 .await;
-            trace_result!(INGEST, span, res);
+
+            send_result!(
+                span,
+                OperationResult::Ingest(TraceResult::from(res.as_ref().map(|b| *b)))
+            );
             res
         }
     }
@@ -294,23 +301,6 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
 
     fn into_stream(self) -> impl StateStoreIterItemStream {
         Self::into_stream_inner(self)
-    }
-}
-
-impl<I> StateStoreIter for TracedStateStoreIter<I>
-where
-    I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>,
-{
-    type Item = (FullKey<Vec<u8>>, Bytes);
-
-    type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            let kv_pair: _ = self.inner.next().await?;
-            trace_result!(ITER_NEXT, self.span, kv_pair);
-            Ok(kv_pair)
-        }
     }
 }
 
