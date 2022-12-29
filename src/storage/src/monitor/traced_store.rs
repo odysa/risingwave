@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, new_global_span, send_result, should_use_trace, ConcurrentId, Operation,
+    init_collector, send_result, should_use_trace, trace_span, ConcurrentId, Operation,
     OperationResult, StorageType, TraceReadOptions, TraceResult, TraceSpan, TracedBytes, LOCAL_ID,
 };
 
@@ -56,7 +56,7 @@ impl<S> TracedStateStore<S> {
         let id = get_concurrent_id();
         let storage_type = StorageType::Local(id, table_id.table_id);
 
-        let _span = new_global_span!(Operation::NewLocalStorage, storage_type);
+        let _span = trace_span!(Operation::NewLocalStorage, storage_type);
 
         Self {
             inner,
@@ -113,7 +113,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            let span = new_global_span!(Operation::Sync(epoch), self.storage_type);
+            let span = trace_span!(Operation::Sync(epoch), self.storage_type);
             let sync_result = self.inner.sync(epoch).await;
             send_result!(
                 span,
@@ -126,7 +126,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        let _span = new_global_span!(Operation::Seal(epoch, is_checkpoint), self.storage_type);
+        let _span = trace_span!(Operation::Seal(epoch, is_checkpoint), self.storage_type);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
@@ -153,7 +153,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            let span = new_global_span!(
+            let span = trace_span!(
                 Operation::get(
                     TracedBytes::from(key.to_vec()),
                     epoch,
@@ -186,7 +186,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let span = new_global_span!(
+        let span = trace_span!(
             Operation::Iter {
                 key_range: (
                     key_range.0.as_ref().map(|v| TracedBytes::from(v.clone())),
@@ -221,7 +221,7 @@ impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
             if kv_pairs.is_empty() && delete_ranges.is_empty() {
                 return Ok(0);
             }
-            let span = new_global_span!(
+            let span = trace_span!(
                 Operation::ingest(
                     kv_pairs
                         .iter()
@@ -267,7 +267,7 @@ impl TracedStateStore<HummockStorage> {
 impl<S> Drop for TracedStateStore<S> {
     fn drop(&mut self) {
         if let StorageType::Local(_, _) = self.storage_type {
-            let _ = new_global_span!(Operation::DropLocalStorage, self.storage_type);
+            let _ = trace_span!(Operation::DropLocalStorage, self.storage_type);
         }
     }
 }

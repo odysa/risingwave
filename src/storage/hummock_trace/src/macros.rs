@@ -15,7 +15,7 @@
 #[macro_export]
 macro_rules! trace {
     (GET, $key:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
-        risingwave_hummock_trace::new_global_span!(
+        risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::get(
                 risingwave_hummock_trace::TracedBytes::from($key.to_vec()),
                 $epoch,
@@ -29,7 +29,7 @@ macro_rules! trace {
         )
     };
     (INGEST, $kvs:ident, $delete_range:ident, $opt:ident, $storage_type:expr) => {
-        risingwave_hummock_trace::new_global_span!(
+        risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::ingest(
                 $kvs.iter()
                     .map(|(k, v)| (
@@ -53,7 +53,7 @@ macro_rules! trace {
         );
     };
     (ITER, $range:ident, $epoch:ident, $opt:ident, $storage_type:expr) => {
-        risingwave_hummock_trace::new_global_span!(
+        risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::Iter {
                 key_range: (
                     $range
@@ -78,37 +78,37 @@ macro_rules! trace {
         );
     };
     (ITER_NEXT, $id:expr, $storage_type:expr) => {
-        risingwave_hummock_trace::new_global_span!(
+        risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::IterNext($id),
             $storage_type
         );
     };
     (SYNC, $epoch:ident, $storage_type:expr) => {
-        risingwave_hummock_trace::new_global_span!(
+        risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::Sync($epoch),
             $storage_type
         );
     };
     (SEAL, $epoch:ident, $check_point:ident, $storage_type:expr) => {
-        let _span = risingwave_hummock_trace::new_global_span!(
+        let _span = risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::Seal($epoch, $check_point),
             $storage_type
         );
     };
     (NEWLOCAL, $storage_type:expr) => {
-        let _span = risingwave_hummock_trace::new_global_span!(
+        let _span = risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::NewLocalStorage,
             $storage_type
         );
     };
     (DROPLOCAL, $storage_type:expr) => {
-        let _ = risingwave_hummock_trace::new_global_span!(
+        let _ = risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::DropLocalStorage,
             $storage_type
         );
     };
     (METAMSG, $resp:ident) => {
-        let _span = risingwave_hummock_trace::new_global_span!(
+        let _span = risingwave_hummock_trace::trace_span!(
             risingwave_hummock_trace::Operation::MetaMessage(Box::new(
                 risingwave_hummock_trace::TraceSubResp($resp.clone(),)
             )),
@@ -160,7 +160,7 @@ macro_rules! trace_result {
 }
 
 #[macro_export]
-macro_rules! new_global_span {
+macro_rules! trace_span {
     ($op:expr, $storage_type:expr) => {
         if risingwave_hummock_trace::should_use_trace() {
             Some(risingwave_hummock_trace::TraceSpan::new_to_global(
