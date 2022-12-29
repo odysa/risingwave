@@ -22,11 +22,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
-#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-use {
-    super::{TracedStateStore, TracedStateStoreIter},
-    risingwave_hummock_trace::StorageType,
-};
 
 use super::StateStoreMetrics;
 use crate::error::{StorageError, StorageResult};
@@ -42,30 +37,19 @@ use crate::{
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
-    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
     inner: Box<S>,
-
-    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-    inner: Box<TracedStateStore<S>>,
 
     stats: Arc<StateStoreMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-        let inner = TracedStateStore::new(inner, StorageType::Global);
-
         Self {
             inner: Box::new(inner),
             stats,
         }
     }
 }
-#[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
-type MonitoredIterInnerType<I> = I;
-#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-type MonitoredIterInnerType<I> = TracedStateStoreIter<I>;
 
 pub type MonitoredStateStoreIterStream<S: StateStoreRead> = impl StateStoreReadIterStream;
 impl<S: StateStoreRead> MonitoredStateStore<S> {
@@ -104,11 +88,6 @@ impl<S: StateStoreRead> MonitoredStateStore<S> {
     }
 
     pub fn inner(&self) -> &S {
-        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-        {
-            self.inner.inner()
-        }
-        #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
         &self.inner
     }
 }
@@ -240,12 +219,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move {
-            MonitoredStateStore {
-                inner: Box::new(self.inner.new_local(table_id).await),
-                stats: self.stats.clone(),
-            }
-        }
+        async move { MonitoredStateStore::new(self.inner.new_local(table_id).await, self.stats.clone()) }
     }
 }
 
@@ -260,11 +234,8 @@ impl MonitoredStateStore<HummockStorage> {
 }
 
 /// A state store iterator wrapper for monitoring metrics.
-pub struct MonitoredStateStoreIter<I> {
-    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
-    inner: I,
-    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-    inner: TracedStateStoreIter<I>,
+pub struct MonitoredStateStoreIter<S> {
+    inner: S,
     stats: MonitoredStateStoreIterStats,
 }
 
