@@ -21,8 +21,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, new_global_span, should_use_trace, trace_result, ConcurrentId, Operation,
-    OperationResult, StorageType, TraceReadOptions, TraceResult, TraceSpan, TracedBytes, LOCAL_ID,
+    init_collector, new_global_span, send_result, should_use_trace, trace_result, ConcurrentId,
+    Operation, OperationResult, StorageType, TraceReadOptions, TraceResult, TraceSpan, TracedBytes,
+    LOCAL_ID,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -77,7 +78,20 @@ impl<S: StateStoreRead> TracedStateStore<S> {
         span: Option<TraceSpan>,
     ) -> StorageResult<TracedStateStoreIterStream<S>> {
         // wait for iterator creation (e.g. seek)
-        let iter_stream = iter_stream_future.await?;
+        let iter_stream = match iter_stream_future.await {
+            Err(e) => {
+                if let Some(span) = span {
+                    span.send_result(OperationResult::Iter(TraceResult::Err));
+                }
+                return Err(e);
+            }
+            Ok(inner) => {
+                if let Some(span) = &span {
+                    span.send_result(OperationResult::Iter(TraceResult::Ok(())));
+                }
+                inner
+            }
+        };
         let traced = TracedStateStoreIter {
             inner: iter_stream,
             span,
@@ -150,7 +164,15 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
             );
 
             let res: StorageResult<Option<Bytes>> = self.inner.get(key, epoch, read_options).await;
-            trace_result!(GET, span, res);
+
+            send_result!(
+                span,
+                OperationResult::Get(TraceResult::from(
+                    res.as_ref()
+                        .map(|o| { o.as_ref().map(|b| TracedBytes::from(b.clone())) })
+                ))
+            );
+
             res
         }
     }
@@ -254,6 +276,18 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
         let inner = self.inner;
         futures::pin_mut!(inner);
         while let Some((key, value)) = inner.try_next().await? {
+            if let Some(span) = &self.span {
+                span.send(Operation::IterNext(span.id()));
+            }
+
+            send_result!(
+                self.span,
+                OperationResult::IterNext(TraceResult::Ok(Some((&key, &value)).map(|(k, v)| (
+                    TracedBytes::from(k.user_key.table_key.to_vec()),
+                    TracedBytes::from(v.clone())
+                ))))
+            );
+
             yield (key, value);
         }
     }
@@ -273,9 +307,6 @@ where
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            if let Some(span) = &self.span {
-                span.send(Operation::IterNext(span.id()));
-            }
             let kv_pair: _ = self.inner.next().await?;
             trace_result!(ITER_NEXT, self.span, kv_pair);
             Ok(kv_pair)
