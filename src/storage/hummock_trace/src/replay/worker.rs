@@ -381,6 +381,7 @@ mod tests {
             retention_seconds: Some(12),
             table_id: 12,
             ignore_range_tombstone: false,
+            read_version_from_backup: false,
         };
         let iter_read_options = TraceReadOptions {
             prefix_hint: None,
@@ -388,6 +389,7 @@ mod tests {
             retention_seconds: Some(124),
             table_id: 123,
             ignore_range_tombstone: true,
+            read_version_from_backup: false,
         };
         let op = Operation::Get {
             key: traced_bytes![123],
@@ -539,6 +541,7 @@ mod tests {
             check_bloom_filter: false,
             table_id: 1,
             retention_seconds: None,
+            read_version_from_backup: false,
         };
 
         let res_bytes = traced_bytes![58, 54, 35];

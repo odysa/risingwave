@@ -282,13 +282,10 @@ impl<T: Send + 'static> Channel for ReplayChannel<T> {
 
 fn from_trace_read_options(opt: TraceReadOptions) -> ReadOptions {
     ReadOptions {
-        prefix_hint: opt.prefix_hint,
-        ignore_range_tombstone: opt.ignore_range_tombstone,
-        check_bloom_filter: opt.check_bloom_filter,
-        retention_seconds: opt.retention_seconds,
         table_id: TableId {
             table_id: opt.table_id,
         },
+        ..opt
     }
 }
 

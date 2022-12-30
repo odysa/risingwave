@@ -22,13 +22,14 @@ use std::sync::Arc;
 
 use clap::Parser;
 use replay_impl::{get_replay_notification_client, GlobalReplayInterface};
-use risingwave_common::config::{load_config, StorageConfig};
+use risingwave_common::config::{load_config, RwConfig, StorageConfig};
 use risingwave_hummock_trace::{
     GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl, USE_TRACE,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_storage::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
 use serde::{Deserialize, Serialize};
@@ -70,8 +71,8 @@ async fn run_replay(args: Args) -> Result<()> {
 }
 
 async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
-    let config: ReplayConfig = load_config(&args.config).expect("failed to read config file");
-    let config = Arc::new(config.storage);
+    let config: RwConfig = load_config(&args.config);
+    let storage_config = Arc::new(config.storage.clone());
 
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
     let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
@@ -82,9 +83,9 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         let tiered_cache = TieredCache::none();
         Arc::new(SstableStore::new(
             Arc::new(object_store),
-            config.data_directory.to_string(),
-            config.block_cache_capacity_mb * (1 << 20),
-            config.meta_cache_capacity_mb * (1 << 20),
+            storage_config.data_directory.to_string(),
+            storage_config.block_cache_capacity_mb * (1 << 20),
+            storage_config.meta_cache_capacity_mb * (1 << 20),
             tiered_cache,
         ))
     };
@@ -112,9 +113,13 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         )
     };
 
+    let backup_store = parse_meta_snapshot_storage(&config).await.unwrap();
+    let backup_reader = BackupReader::new(backup_store);
+
     let storage = HummockStorage::new(
-        config,
+        storage_config,
         sstable_store,
+        backup_reader,
         hummock_meta_client.clone(),
         notification_client,
         state_store_stats,

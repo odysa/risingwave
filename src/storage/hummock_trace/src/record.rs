@@ -147,6 +147,7 @@ impl Operation {
                 ignore_range_tombstone,
                 check_bloom_filter,
                 retention_seconds,
+                read_version_from_backup: false,
                 table_id,
             },
         }
@@ -302,6 +303,7 @@ pub struct TraceReadOptions {
     pub check_bloom_filter: bool,
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
+    pub read_version_from_backup: bool,
 }
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub struct TracedWriteOptions {

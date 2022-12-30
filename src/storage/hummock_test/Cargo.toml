@@ -12,6 +12,7 @@ repository = { workspace = true }
 async-stream = "0.3"
 async-trait = "0.1"
 bytes = { version = "1" }
+clap = "4.0.32"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
