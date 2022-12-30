@@ -193,13 +193,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
                     key_range.1.as_ref().map(|v| TracedBytes::from(v.clone()))
                 ),
                 epoch: epoch,
-                read_options: TraceReadOptions {
-                    prefix_hint: read_options.prefix_hint.clone(),
-                    table_id: read_options.table_id.table_id,
-                    retention_seconds: read_options.retention_seconds,
-                    check_bloom_filter: read_options.check_bloom_filter,
-                    ignore_range_tombstone: read_options.ignore_range_tombstone,
-                }
+                read_options: to_traced_read_opt(&read_options)
             },
             self.storage_type
         );
@@ -306,4 +300,14 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
 
 pub fn get_concurrent_id() -> ConcurrentId {
     LOCAL_ID.get()
+}
+
+fn to_traced_read_opt(read_options: &ReadOptions) -> TraceReadOptions {
+    TraceReadOptions {
+        prefix_hint: read_options.prefix_hint.clone(),
+        table_id: read_options.table_id.table_id,
+        retention_seconds: read_options.retention_seconds,
+        check_bloom_filter: read_options.check_bloom_filter,
+        ignore_range_tombstone: read_options.ignore_range_tombstone,
+    }
 }
