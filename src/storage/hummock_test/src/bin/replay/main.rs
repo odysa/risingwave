@@ -76,7 +76,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
     let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
     let object_store =
-        parse_remote_object_store(&args.object_storage, object_store_stats, false).await;
+        parse_remote_object_store(&args.object_storage, object_store_stats, false, "hummock").await;
 
     let sstable_store = {
         let tiered_cache = TieredCache::none();
