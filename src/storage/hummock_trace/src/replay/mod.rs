@@ -83,7 +83,7 @@ pub trait ReplayStateStore {
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
-pub trait ReplayIter: Send + Sync {
+pub trait ReplayIter: Send {
     async fn next(&mut self) -> Option<(TracedBytes, TracedBytes)>;
 }
 

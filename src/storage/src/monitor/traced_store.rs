@@ -309,5 +309,6 @@ fn to_traced_read_opt(read_options: &ReadOptions) -> TraceReadOptions {
         retention_seconds: read_options.retention_seconds,
         check_bloom_filter: read_options.check_bloom_filter,
         ignore_range_tombstone: read_options.ignore_range_tombstone,
+        read_version_from_backup: read_options.read_version_from_backup,
     }
 }

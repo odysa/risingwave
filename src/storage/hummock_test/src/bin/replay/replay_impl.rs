@@ -15,6 +15,7 @@
 use std::ops::Bound;
 
 use bytes::Bytes;
+use futures::StreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
@@ -35,26 +36,25 @@ use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+    ReadOptions, StateStoreIterItemStream, StateStoreRead, StateStoreWrite, SyncResult,
+    WriteOptions,
 };
-use risingwave_storage::{StateStore, StateStoreIter};
+use risingwave_storage::{StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::dispatch_iter;
-pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>>(I);
+pub(crate) struct HummockReplayIter<I>(I);
 
-impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> HummockReplayIter<I> {
+impl<I: StateStoreIterItemStream + Send + Unpin> HummockReplayIter<I> {
     fn new(iter: I) -> Self {
         Self(iter)
     }
 }
 
 #[async_trait::async_trait]
-impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)> + Send + Sync> ReplayIter
-    for HummockReplayIter<I>
-{
+impl<I: StateStoreIterItemStream + Send + Unpin> ReplayIter for HummockReplayIter<I> {
     async fn next(&mut self) -> Option<(TracedBytes, TracedBytes)> {
-        let key_value: Option<(FullKey<Vec<u8>>, Bytes)> = self.0.next().await.unwrap();
+        let key_value: Option<(FullKey<Vec<u8>>, Bytes)> = self.0.next().await.unwrap().ok();
         key_value.map(|(key, value)| {
             (
                 TracedBytes::from(key.user_key.table_key.to_vec()),
@@ -285,7 +285,11 @@ fn from_trace_read_options(opt: TraceReadOptions) -> ReadOptions {
         table_id: TableId {
             table_id: opt.table_id,
         },
-        ..opt
+        read_version_from_backup: opt.read_version_from_backup,
+        retention_seconds: opt.retention_seconds,
+        prefix_hint: opt.prefix_hint,
+        ignore_range_tombstone: opt.ignore_range_tombstone,
+        check_bloom_filter: opt.check_bloom_filter,
     }
 }
 
