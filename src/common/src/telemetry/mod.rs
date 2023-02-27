@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod report;
-pub mod report_manager;
 
 use std::time::SystemTime;
 

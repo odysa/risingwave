@@ -22,6 +22,7 @@ use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::telemetry::report::start_telemetry_reporting;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -68,7 +69,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::start_meta_telemetry_reporting;
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -552,7 +553,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     // May start telemetry reporting
     if let MetaBackend::Etcd = meta_store.meta_store_type() && system_params_reader.telemetry_enabled(){
-        sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await);
+        sub_tasks.push(start_telemetry_reporting(
+            MetaTelemetryInfoFetcher::new(meta_store.clone(), system_params_manager.clone()),
+            MetaReportCreator::new(),
+        ));
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }

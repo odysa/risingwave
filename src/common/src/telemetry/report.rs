@@ -39,6 +39,13 @@ pub trait TelemetryReportCreator {
     fn report_type(&self) -> &str;
 }
 
+/// This function spawns a new tokio task to report telemetry.
+/// It creates a channel for killing itself and a join handle to the spawned task.
+/// It then creates an interval of `TELEMETRY_REPORT_INTERVAL` seconds and checks if telemetry is
+/// enabled. If it is, it gets or creates a tracking ID from the meta store,
+/// creates a `TelemetryReport` object with system data, uptime, timestamp, and tracking ID.
+/// Finally, it posts the report to `TELEMETRY_REPORT_URL`.
+/// If an error occurs at any point in the process, it logs an error message.
 pub fn start_telemetry_reporting<F, I>(
     info_fetcher: I,
     report_creator: F,
@@ -65,7 +72,10 @@ where
                     return;
                 }
             }
+
             // fetch telemetry tracking_id and configs from the meta node
+            // TODO: Don't do RPC call every time. Allow meta node to notify other nodes
+            // when system params change
             let (telemetry_enabled, tracking_id) = match fetcher.fetch_telemetry_info().await {
                 Ok(resp) => resp,
                 Err(err) => {
