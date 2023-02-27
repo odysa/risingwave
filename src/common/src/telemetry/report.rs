@@ -24,7 +24,7 @@ use super::{
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
-    async fn fetch_telemetry_info(&self) -> Result<(bool, String)>;
+    async fn fetch_telemetry_info(&self) -> Result<(bool, Option<String>)>;
 }
 
 pub trait TelemetryReportCreator {
@@ -74,7 +74,7 @@ where
                 }
             };
 
-            if !telemetry_enabled {
+            if !telemetry_enabled && tracking_id.is_none() {
                 tracing::info!("Telemetry is not enabled");
                 return;
             }
@@ -82,7 +82,7 @@ where
             // create a report and serialize to json
             let report_json = match report_creator
                 .create_report(
-                    tracking_id.clone(),
+                    tracking_id.clone().unwrap(), // checked none before
                     session_id.clone(),
                     begin_time.elapsed().as_secs(),
                 )
@@ -103,7 +103,7 @@ where
                 (TELEMETRY_REPORT_URL.to_owned() + "/" + report_creator.report_type()).to_owned();
 
             match post_telemetry_report(&url, report_json).await {
-                Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),
+                Ok(_) => tracing::info!("Telemetry post success, id {:?}", tracking_id),
                 Err(e) => tracing::error!("Telemetry post error, {}", e),
             }
         }

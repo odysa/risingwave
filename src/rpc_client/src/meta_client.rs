@@ -962,12 +962,11 @@ impl HummockMetaClient for MetaClient {
 
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<(bool, String)> {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<(bool, Option<String>)> {
         let params = self.get_system_params().await?;
-        Ok((
-            params.telemetry_enabled(),
-            params.telemetry_tracking_id().to_string(),
-        ))
+        // todo: try to put tracking_id in system params
+        let id = self.get_telemetry_info().await?.tracking_id;
+        Ok((params.telemetry_enabled(), id))
     }
 }
 

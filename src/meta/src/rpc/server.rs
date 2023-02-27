@@ -551,7 +551,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     sub_tasks.push((stream_abort_handler, abort_sender));
 
     // May start telemetry reporting
-    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled{
+    if let MetaBackend::Etcd = meta_store.meta_store_type() && system_params_reader.telemetry_enabled(){
         sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await);
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");

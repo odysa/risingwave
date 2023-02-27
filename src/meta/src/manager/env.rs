@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::telemetry::telemetry_enabled_env;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
@@ -154,6 +155,22 @@ impl MetaOpts {
     pub fn init_system_params(&self) -> SystemParams {
         // For fields not provided from CLI, use default values.
         // For deprecated fields, use `None`.
+
+        // combine environment variables and system params
+        let telemetry_enabled = {
+            if telemetry_enabled_env() != self.telemetry_enabled {
+                tracing::info!(
+                    "telemetry_enabled variables don't match, env: {}, config: {}",
+                    telemetry_enabled_env(),
+                    self.telemetry_enabled
+                );
+                // either must be false
+                false
+            } else {
+                self.telemetry_enabled
+            }
+        };
+
         SystemParams {
             barrier_interval_ms: Some(self.barrier_interval.as_millis() as u32),
             checkpoint_frequency: Some(self.checkpoint_frequency as u64),
@@ -164,8 +181,7 @@ impl MetaOpts {
             data_directory: Some(self.data_directory.clone()),
             backup_storage_url: Some(self.backup_storage_url.clone()),
             backup_storage_directory: Some(self.backup_storage_directory.clone()),
-            telemetry_enabled: Some(self.telemetry_enabled),
-            telemetry_tracking_id: Some("".to_string()),
+            telemetry_enabled: Some(telemetry_enabled),
         }
     }
 }
