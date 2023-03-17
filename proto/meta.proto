@@ -15,8 +15,12 @@ option optimize_for = SPEED;
 
 message GetTelemetryInfoRequest {}
 
+message TelemetryInfo {
+  string tracking_id = 1;
+}
+
 message TelemetryInfoResponse {
-  optional string tracking_id = 1;
+  optional TelemetryInfo info = 1;
 }
 
 service TelemetryInfoService {

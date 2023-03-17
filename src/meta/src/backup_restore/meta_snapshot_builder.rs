@@ -100,10 +100,11 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
         let tracking_id = get_tracking_id_at_snapshot::<S>(&meta_store_snapshot)
-            .await?
-            .ok_or_else(|| {
-                anyhow!("tracking_id not found in meta store, telemetry may be disabled")
-            })?;
+            .await
+            .map_err(|_| anyhow!("tracking_id not found in meta store"))
+            // use default if telemetry if not enabled
+            .unwrap_or_default()
+            .to_string();
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
             hummock_version,
@@ -158,6 +159,7 @@ mod tests {
     use crate::manager::model::SystemParamsModel;
     use crate::model::MetadataModel;
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
+    use crate::telemetry::TrackingID;
 
     #[tokio::test]
     async fn test_snapshot_builder() {
@@ -200,8 +202,24 @@ mod tests {
             .insert(meta_store.deref())
             .await
             .unwrap();
+
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         builder.build(1).await.unwrap();
+        // Initially be an empty string
+        assert_eq!(builder.snapshot.metadata.tracking_id, String::default());
+
+        let tracking_id = TrackingID::new();
+        tracking_id
+            .put_int_meta_store(meta_store.clone())
+            .await
+            .unwrap();
+
+        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
+        builder.build(1).await.unwrap();
+        assert_eq!(
+            builder.snapshot.metadata.tracking_id,
+            tracking_id.to_string()
+        );
 
         let dummy_key = vec![0u8, 1u8, 2u8];
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());

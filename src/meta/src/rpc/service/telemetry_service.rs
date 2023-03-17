@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::config::MetaBackend;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
-use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
+use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfo, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
@@ -55,9 +55,9 @@ impl<S: MetaStore> TelemetryInfoService for TelemetryInfoServiceImpl<S> {
     ) -> Result<Response<TelemetryInfoResponse>, Status> {
         match self.get_tracking_id().await {
             Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
-                tracking_id: Some(tracking_id),
+                info: Some(TelemetryInfo { tracking_id }),
             })),
-            None => Ok(Response::new(TelemetryInfoResponse { tracking_id: None })),
+            None => Ok(Response::new(TelemetryInfoResponse { info: None })),
         }
     }
 }

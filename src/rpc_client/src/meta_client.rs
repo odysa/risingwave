@@ -984,8 +984,9 @@ impl TelemetryInfoFetcher for MetaClient {
     async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
         let resp = self.get_telemetry_info().await?;
         let tracking_id = resp
-            .get_tracking_id()
-            .map_err(|e| anyhow::format_err!("failed to get tracking_id {:?}", e))?;
+            .get_info()
+            .map_err(|e| anyhow::format_err!("failed to get telemetry info {:?}", e))?
+            .get_tracking_id();
         Ok(tracking_id.to_string())
     }
 }
