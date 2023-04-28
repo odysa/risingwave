@@ -29,6 +29,8 @@ pub(crate) use env::*;
 pub(crate) use id::*;
 pub(crate) use idle::*;
 pub(crate) use notification::*;
-pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef};
+pub use notification::{
+    LocalNotification, MessageStatus, NotificationManagerRef, NotificationVersion,
+};
 pub(crate) use streaming_job::*;
 pub(crate) use system_param::*;

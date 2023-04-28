@@ -21,8 +21,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_trace::{
-    GlobalReplay, LocalReplay, ReplayIter, ReplayRead, ReplayStateStore, ReplayWrite, Result,
-    TraceError, TraceSubResp, TracedBytes, TracedReadOptions, TracedWriteOptions,
+    GlobalReplay, LocalReplay, LocalReplayRead, ReplayIter, ReplayRead, ReplayStateStore,
+    ReplayWrite, Result, TraceError, TraceSubResp, TracedBytes, TracedReadOptions,
 };
 use risingwave_meta::manager::{
     MessageStatus, MetaSrvEnv, NotificationManagerRef, NotificationVersion, WorkerKey,
@@ -34,9 +34,7 @@ use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
-};
+use risingwave_storage::store::{LocalStateStore, StateStoreRead, StateStoreWrite, SyncResult};
 use risingwave_storage::{StateStore, StateStoreIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
@@ -149,11 +147,10 @@ pub(crate) struct LocalReplayInterface(LocalHummockStorage);
 impl LocalReplay for LocalReplayInterface {}
 
 #[async_trait::async_trait]
-impl ReplayRead for LocalReplayInterface {
+impl LocalReplayRead for LocalReplayInterface {
     async fn iter(
         &self,
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
-        epoch: u64,
         read_options: TracedReadOptions,
     ) -> Result<Box<dyn ReplayIter>> {
         dispatch_iter!(self.0, key_range, epoch, read_options)
@@ -162,12 +159,11 @@ impl ReplayRead for LocalReplayInterface {
     async fn get(
         &self,
         key: TracedBytes,
-        epoch: u64,
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
         Ok(self
             .0
-            .get(&key, epoch, from_trace_read_options(read_options))
+            .get(&key, from_trace_read_options(read_options))
             .await
             .unwrap()
             .map(TracedBytes::from))
