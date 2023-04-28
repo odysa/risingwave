@@ -22,13 +22,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
-#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-use {
-    super::{TracedStateStore, TracedStateStoreIter},
-    risingwave_hummock_trace::StorageType,
-};
 
 use super::MonitoredStorageMetrics;
+#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+use super::{TracedStateStore, TracedStateStoreIter};
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
@@ -53,7 +50,27 @@ pub struct MonitoredStateStore<S> {
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
-        let inner = TracedStateStore::new(inner, StorageType::Global);
+        let inner = TracedStateStore::new_global(inner);
+
+        Self {
+            inner: Box::new(inner),
+            storage_metrics,
+        }
+    }
+
+    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+    pub fn new_from_local(
+        inner: TracedStateStore<S>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
+    ) -> Self {
+        Self {
+            inner: Box::new(inner),
+            storage_metrics,
+        }
+    }
+
+    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+    pub fn new_from_local(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
             storage_metrics,
@@ -261,7 +278,11 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
+    // #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
     type Local = MonitoredStateStore<S::Local>;
+
+    // #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+    // type Local = MonitoredStateStore<TracedStateStore<S::Local>>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -321,7 +342,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
 
     fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
         async move {
-            MonitoredStateStore::new(
+            MonitoredStateStore::new_from_local(
                 self.inner
                     .new_local(option)
                     .instrument_await("store_new_local")

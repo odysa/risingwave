@@ -32,7 +32,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_hummock_sdk::opts::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_with_hasher_in, ExecutorCache};

@@ -18,14 +18,14 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
+use risingwave_hummock_sdk::opts::{
+    CachePolicy, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
-};
+use risingwave_storage::store::LocalStateStore;
 
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 

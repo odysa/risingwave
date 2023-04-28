@@ -19,7 +19,9 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::opts::{CachePolicy, PrefetchOptions, ReadOptions, WriteOptions};
+use risingwave_hummock_sdk::opts::{
+    CachePolicy, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+};
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::StorageType;
@@ -94,7 +96,7 @@ pub enum Operation {
     /// Get operation of Hummock.
     Get {
         key: TracedBytes,
-        epoch: u64,
+        epoch: Option<u64>,
         read_options: TracedReadOptions,
     },
 
@@ -117,7 +119,7 @@ pub enum Operation {
     /// Iter operation of Hummock
     Iter {
         key_range: TracedIterRange,
-        epoch: u64,
+        epoch: Option<u64>,
         read_options: TracedReadOptions,
     },
     /// Iter.next operation
@@ -133,7 +135,7 @@ pub enum Operation {
 
     Result(OperationResult),
 
-    NewLocalStorage,
+    NewLocalStorage(NewLocalOptions),
     DropLocalStorage,
 
     /// The end of an operation
@@ -141,7 +143,7 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn get(key: Bytes, epoch: u64, read_options: ReadOptions) -> Operation {
+    pub fn get(key: Bytes, epoch: Option<u64>, read_options: ReadOptions) -> Operation {
         Operation::Get {
             key: key.into(),
             epoch,

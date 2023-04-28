@@ -43,8 +43,23 @@ pub(crate) enum WorkerId {
     Local(u64),
     OneShot(u64),
 }
-pub trait LocalReplay: ReplayRead + ReplayWrite + Send + Sync {}
+pub trait LocalReplay: LocalReplayRead + ReplayWrite + Send + Sync {}
 pub trait GlobalReplay: ReplayRead + ReplayStateStore + Send + Sync {}
+
+#[cfg_attr(test, automock)]
+#[async_trait::async_trait]
+pub trait LocalReplayRead {
+    async fn iter(
+        &self,
+        key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
+        read_options: TracedReadOptions,
+    ) -> Result<Box<dyn ReplayIter>>;
+    async fn get(
+        &self,
+        key: TracedBytes,
+        read_options: TracedReadOptions,
+    ) -> Result<Option<TracedBytes>>;
+}
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -133,17 +148,15 @@ mock! {
 mock! {
     pub LocalReplayInterface{}
     #[async_trait::async_trait]
-    impl ReplayRead for LocalReplayInterface{
+    impl LocalReplayRead for LocalReplayInterface{
         async fn iter(
             &self,
             key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
-            epoch: u64,
             read_options: TracedReadOptions,
         ) -> Result<Box<dyn ReplayIter>>;
         async fn get(
             &self,
             key: TracedBytes,
-            epoch: u64,
             read_options: TracedReadOptions,
         ) -> Result<Option<TracedBytes>>;
     }

@@ -26,11 +26,11 @@ use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build, BoxedExpression, InputRefExpression, LiteralExpression};
+use risingwave_hummock_sdk::opts::PrefetchOptions;
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;

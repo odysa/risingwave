@@ -23,6 +23,7 @@ use std::sync::LazyLock;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
 use tokio::sync::mpsc::{
     unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
@@ -173,7 +174,7 @@ impl TraceSpan {
 
     pub fn new_get_span(
         key: Bytes,
-        epoch: u64,
+        epoch: Option<u64>,
         read_options: ReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
@@ -182,7 +183,7 @@ impl TraceSpan {
 
     pub fn new_iter_span(
         key_range: (Bound<Bytes>, Bound<Bytes>),
-        epoch: u64,
+        epoch: Option<u64>,
         read_options: ReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
@@ -223,6 +224,25 @@ impl TraceSpan {
             },
             storage_type,
         )
+    }
+
+    pub fn new_sync_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global(Operation::Sync(epoch), storage_type)
+    }
+
+    pub fn new_seal_span(
+        epoch: u64,
+        is_checkpoint: bool,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
+        Self::new_global(Operation::Seal(epoch, is_checkpoint), storage_type)
+    }
+
+    pub fn new_local_storage_span(
+        option: NewLocalOptions,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
+        Self::new_global(Operation::NewLocalStorage(option), storage_type)
     }
 
     pub fn send(&self, op: Operation) {
@@ -279,7 +299,7 @@ pub type ConcurrentId = u64;
 #[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
 pub enum StorageType {
     Global,
-    Local(ConcurrentId, NewLocalOptions),
+    Local(ConcurrentId, TableId),
 }
 
 task_local! {
@@ -310,7 +330,11 @@ mod tests {
             let collector = collector.clone();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let op = Operation::get(Bytes::from(vec![i as u8]), 123, ReadOptions::for_test(0));
+                let op = Operation::get(
+                    Bytes::from(vec![i as u8]),
+                    Some(123),
+                    ReadOptions::for_test(0),
+                );
                 let _span = TraceSpan::new_with_op(
                     collector.tx(),
                     generator.next(),
@@ -341,7 +365,7 @@ mod tests {
 
         let op = Operation::get(
             Bytes::from(vec![74, 56, 43, 67]),
-            256,
+            Some(256),
             ReadOptions::for_test(0),
         );
         let mut mock_writer = MockTraceWriter::new();
@@ -365,7 +389,7 @@ mod tests {
                     tx,
                     generator.next(),
                     op,
-                    StorageType::Local(0, NewLocalOptions::for_test(TableId { table_id: 0 })),
+                    StorageType::Local(0, TableId { table_id: 0 }),
                 );
             });
             handles.push(handle);
