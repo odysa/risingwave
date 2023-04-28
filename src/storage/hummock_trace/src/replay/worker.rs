@@ -176,11 +176,15 @@ impl ReplayWorker {
                 read_options,
             } => {
                 let actual = match storage_type {
-                    StorageType::Global => replay.get(key, epoch, read_options).await,
-                    StorageType::Local(_, new_local_opts) => {
-                        assert_eq!(new_local_opts.table_id, read_options.table_id);
+                    StorageType::Global => {
+                        // epoch must be Some
+                        let epoch = epoch.unwrap();
+                        replay.get(key, epoch, read_options).await
+                    }
+                    StorageType::Local(_, table_id) => {
+                        assert_eq!(table_id, read_options.table_id);
                         let s = local_storages.get_mut(&read_options.table_id).unwrap();
-                        s.get(key, epoch, read_options).await
+                        s.get(key, read_options).await
                     }
                 };
                 let res = res_rx.recv().await.expect("recv result failed");
@@ -207,11 +211,15 @@ impl ReplayWorker {
                 read_options,
             } => {
                 let iter = match storage_type {
-                    StorageType::Global => replay.iter(key_range, epoch, read_options).await,
-                    StorageType::Local(_, new_local_opts) => {
-                        assert_eq!(new_local_opts.table_id, read_options.table_id);
+                    StorageType::Global => {
+                        // Global Storage must have a epoch
+                        let epoch = epoch.unwrap();
+                        replay.iter(key_range, epoch, read_options).await
+                    }
+                    StorageType::Local(_, table_id) => {
+                        assert_eq!(table_id, read_options.table_id);
                         let s = local_storages.get_mut(&read_options.table_id).unwrap();
-                        s.iter(key_range, epoch, read_options).await
+                        s.iter(key_range, read_options).await
                     }
                 };
                 let res = res_rx.recv().await.expect("recv result failed");
@@ -243,14 +251,14 @@ impl ReplayWorker {
                     assert_eq!(TraceResult::Ok(actual), expected, "iter_next result wrong");
                 }
             }
-            Operation::NewLocalStorage => {
-                if let StorageType::Local(_, new_local_opts) = storage_type {
+            Operation::NewLocalStorage(new_local_opts) => {
+                if let StorageType::Local(_, _) = storage_type {
                     local_storages.insert(new_local_opts.table_id, replay).await;
                 }
             }
             Operation::DropLocalStorage => {
-                if let StorageType::Local(_, new_local_opts) = storage_type {
-                    local_storages.remove(&new_local_opts.table_id);
+                if let StorageType::Local(_, table_id) = storage_type {
+                    local_storages.remove(&table_id);
                 }
                 // All local storages have been dropped, we should shutdown this worker
                 // If there are incoming new_local, this ReplayWorker will spawn again
@@ -381,11 +389,11 @@ mod tests {
 
         let read_options = ReadOptions::for_test(12);
         let iter_read_options = ReadOptions::for_test(123);
-        let op = Operation::get(Bytes::from(vec![123]), 123, read_options);
+        let op = Operation::get(Bytes::from(vec![123]), Some(123), read_options);
 
         let new_local_opts = NewLocalOptions::for_test(TableId { table_id: 0 });
         let mut should_exit = false;
-        let get_storage_type = StorageType::Local(0, new_local_opts);
+        let get_storage_type = StorageType::Local(0, new_local_opts.table_id);
         let record = Record::new(get_storage_type, 1, op);
         let mut mock_replay = MockGlobalReplayInterface::new();
 
@@ -394,12 +402,8 @@ mod tests {
 
             mock_local
                 .expect_get()
-                .with(
-                    predicate::eq(traced_bytes![123]),
-                    predicate::eq(123),
-                    predicate::always(),
-                )
-                .returning(|_, _, _| Ok(Some(traced_bytes![120])));
+                .with(predicate::eq(traced_bytes![123]), predicate::always())
+                .returning(|_, _| Ok(Some(traced_bytes![120])));
 
             Box::new(mock_local)
         });
@@ -411,10 +415,9 @@ mod tests {
                 .expect_iter()
                 .with(
                     predicate::eq((Bound::Unbounded, Bound::Unbounded)),
-                    predicate::eq(45),
                     predicate::always(),
                 )
-                .returning(|_, _, _| {
+                .returning(|_, _| {
                     let mut mock_iter = MockReplayIter::new();
                     mock_iter
                         .expect_next()
@@ -429,7 +432,11 @@ mod tests {
         let replay = Arc::new(mock_replay);
 
         ReplayWorker::handle_record(
-            Record(get_storage_type, 0, Operation::NewLocalStorage),
+            Record(
+                get_storage_type,
+                0,
+                Operation::NewLocalStorage(new_local_opts),
+            ),
             &replay,
             &mut res_rx,
             &mut iters_map,
@@ -458,14 +465,18 @@ mod tests {
 
         let op = Operation::Iter {
             key_range: (Bound::Unbounded, Bound::Unbounded),
-            epoch: 45,
-            read_options: TracedReadOptions::from(iter_read_options),
+            epoch: Some(45),
+            read_options: iter_read_options.into(),
         };
 
-        let iter_storage_type = StorageType::Local(0, new_local_opts);
+        let iter_storage_type = StorageType::Local(0, new_local_opts.table_id);
 
         ReplayWorker::handle_record(
-            Record(iter_storage_type, 2, Operation::NewLocalStorage),
+            Record(
+                iter_storage_type,
+                2,
+                Operation::NewLocalStorage(new_local_opts),
+            ),
             &replay,
             &mut res_rx,
             &mut iters_map,
@@ -540,7 +551,7 @@ mod tests {
         let record = Record(
             StorageType::Global,
             record_id,
-            Operation::get(key.into_bytes(), epoch, read_options),
+            Operation::get(key.into_bytes(), Some(epoch), read_options),
         );
         scheduler.schedule(record);
 

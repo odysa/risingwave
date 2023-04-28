@@ -35,16 +35,14 @@ use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
+use risingwave_hummock_sdk::opts::{CachePolicy, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
-use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
-use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
-};
+use risingwave_storage::store::{LocalStateStore, StateStoreIterItemStream};
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::StateStore;
 use tracing::trace;

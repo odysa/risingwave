@@ -27,7 +27,7 @@ use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_hummock_sdk::opts::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;

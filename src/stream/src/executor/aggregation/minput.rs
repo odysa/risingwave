@@ -26,7 +26,7 @@ use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_hummock_sdk::opts::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInputBatch};

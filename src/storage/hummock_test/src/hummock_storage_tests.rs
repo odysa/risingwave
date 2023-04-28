@@ -21,9 +21,11 @@ use parking_lot::RwLock;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, UserKey, TABLE_PREFIX_LEN};
+use risingwave_hummock_sdk::opts::{
+    CachePolicy, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
-use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::StateStore;

@@ -21,6 +21,9 @@ use futures::{pin_mut, TryStreamExt};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::opts::{
+    CachePolicy, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+};
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
@@ -29,7 +32,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
-use risingwave_storage::hummock::{CachePolicy, HummockStorage};
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 

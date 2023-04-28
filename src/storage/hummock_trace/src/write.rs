@@ -131,7 +131,7 @@ mod test {
     fn test_bincode_serialize() {
         let op = Operation::get(
             Bytes::from(vec![0, 1, 2, 3]),
-            123,
+            Some(123),
             ReadOptions::for_test(123),
         );
         let expected = Record::new_local_none(0, op);

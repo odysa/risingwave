@@ -15,7 +15,7 @@
 use futures::{pin_mut, StreamExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_hummock_sdk::opts::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;

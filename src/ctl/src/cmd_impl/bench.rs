@@ -21,7 +21,7 @@ use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_hummock_sdk::opts::PrefetchOptions;
 use size::Size;
 use tokio::task::JoinHandle;
 

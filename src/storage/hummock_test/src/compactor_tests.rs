@@ -35,6 +35,9 @@ pub(crate) mod tests {
         FullKeyFilterKeyExtractor,
     };
     use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::opts::{
+        CachePolicy, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+    };
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
@@ -48,7 +51,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
         SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};

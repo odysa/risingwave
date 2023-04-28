@@ -16,22 +16,21 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions, WriteOptions};
+use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
-    init_collector, should_use_trace, trace, trace_result, ConcurrentId, MayTraceSpan, Operation,
-    OperationResult, StorageType, TraceResult, TraceSpan, TracedBytes, LOCAL_ID,
+    init_collector, should_use_trace, trace, ConcurrentId, MayTraceSpan, OperationResult,
+    StorageType, TraceResult, TraceSpan, TracedBytes, LOCAL_ID,
 };
 
 use super::identity;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
-use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_local_state_store_associated_type, define_state_store_associated_type,
-    define_state_store_read_associated_type, define_state_store_write_associated_type, StateStore,
+    define_state_store_read_associated_type, StateStore,
 };
 
 #[derive(Clone)]
@@ -52,11 +51,16 @@ impl<S> TracedStateStore<S> {
         }
     }
 
-    pub fn new_local(inner: S, opts: NewLocalOptions) -> Self {
-        let id = get_concurrent_id();
-        let storage_type = StorageType::Local(id, opts.clone());
+    pub fn new_global(inner: S) -> Self {
+        Self::new(inner, StorageType::Global)
+    }
 
-        trace!(NEWLOCAL, storage_type);
+    pub fn new_local(inner: S, options: NewLocalOptions) -> Self {
+        let id = get_concurrent_id();
+        let storage_type: StorageType = StorageType::Local(id, options.table_id);
+
+        let _span: MayTraceSpan = TraceSpan::new_local_storage_span(options, storage_type);
+
         Self {
             inner,
             storage_type,
@@ -69,14 +73,31 @@ impl<S> TracedStateStore<S> {
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
         span: MayTraceSpan,
     ) -> StorageResult<TracedStateStoreIterStream<'s, St>> {
-        let iter_stream = iter_stream_future
-            .await
-            .inspect_err(|e| tracing::error!("Failed in iter: {:?}", e))?;
+        let iter_stream = iter_stream_future.await?;
         let traced = TracedStateStoreIter {
             inner: iter_stream,
             span,
         };
         Ok(traced.into_stream())
+    }
+
+    async fn traced_get(
+        &self,
+        key: Bytes,
+        epoch: Option<u64>,
+        read_options: ReadOptions,
+        get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
+    ) -> StorageResult<Option<Bytes>> {
+        let span =
+            TraceSpan::new_get_span(key.clone(), epoch, read_options.clone(), self.storage_type);
+
+        let res = get_future.await;
+
+        span.may_send_result(OperationResult::Get(TraceResult::from(
+            res.as_ref()
+                .map(|o| o.as_ref().map(|b| TracedBytes::from(b.clone()))),
+        )));
+        Ok(res?)
     }
 }
 
@@ -100,11 +121,27 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
-        self.inner.get(key, read_options)
+        self.traced_get(
+            key.clone(),
+            None,
+            read_options.clone(),
+            self.inner.get(key, read_options),
+        )
     }
 
     fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
-        self.inner.iter(key_range, read_options)
+        let span = TraceSpan::new_iter_span(
+            key_range.clone(),
+            None,
+            read_options.clone(),
+            self.storage_type,
+        );
+        self.traced_iter(
+            read_options.table_id,
+            self.inner.iter(key_range, read_options),
+            span,
+        )
+        .map_ok(identity)
     }
 
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
@@ -116,17 +153,25 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         );
         let res = self.inner.insert(key, new_val, old_val);
 
-        span.may_send_result(OperationResult::Insert(res.into()));
+        span.may_send_result(OperationResult::Insert(
+            res.as_ref().map(|o| o.clone()).into(),
+        ));
         res
     }
 
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
-        // TODO: collect metrics
-        self.inner.delete(key, old_val)
+        let span = TraceSpan::new_delete_span(key.clone(), old_val.clone(), self.storage_type);
+
+        let res = self.inner.delete(key, old_val);
+
+        span.may_send_result(OperationResult::Delete(
+            res.as_ref().map(|o| o.clone()).into(),
+        ));
+
+        res
     }
 
     fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
-        // TODO: collect metrics
         self.inner.flush(delete_ranges)
     }
 
@@ -139,7 +184,6 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     fn init(&mut self, epoch: u64) {
-        // TODO: may collect metrics
         self.inner.init(epoch)
     }
 
@@ -161,15 +205,19 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            let span = trace!(SYNC, epoch, self.storage_type);
+            let span = TraceSpan::new_sync_span(epoch, self.storage_type);
+
             let sync_result = self.inner.sync(epoch).await;
-            trace_result!(SYNC, span, sync_result);
+
+            span.may_send_result(OperationResult::Sync(
+                sync_result.as_ref().map(|res| res.sync_size.clone()).into(),
+            ));
             sync_result
         }
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        trace!(SEAL, epoch, is_checkpoint, self.storage_type);
+        let _span = TraceSpan::new_seal_span(epoch, is_checkpoint, self.storage_type);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
@@ -177,8 +225,8 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         async move { self.inner.clear_shared_buffer().await }
     }
 
-    fn new_local(&self, opts: NewLocalOptions) -> Self::NewLocalFuture<'_> {
-        async move { TracedStateStore::new_local(self.inner.new_local(opts.clone()).await, opts) }
+    fn new_local(&self, options: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        async move { TracedStateStore::new_local(self.inner.new_local(options.clone()).await, options) }
     }
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
@@ -192,23 +240,12 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
     define_state_store_read_associated_type!();
 
     fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
-        async move {
-            let span = TraceSpan::new_get_span(
-                key.clone(),
-                epoch,
-                read_options.clone(),
-                self.storage_type,
-            );
-
-            let res: StorageResult<Option<Bytes>> = self.inner.get(key, epoch, read_options).await;
-
-            span.may_send_result(OperationResult::Get(TraceResult::from(
-                res.as_ref()
-                    .map(|o| o.as_ref().map(|b| TracedBytes::from(b.clone()))),
-            )));
-
-            res
-        }
+        self.traced_get(
+            key.clone(),
+            Some(epoch),
+            read_options.clone(),
+            self.inner.get(key, epoch, read_options),
+        )
     }
 
     fn iter(
@@ -217,53 +254,18 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        async move {
-            let span = TraceSpan::new_iter_span(
-                key_range.clone(),
-                epoch,
-                read_options.clone(),
-                self.storage_type,
-            );
-            self.traced_iter(
-                read_options.table_id,
-                self.inner.iter(key_range, epoch, read_options),
-                span,
-            )
-            .await
-            .map_ok(identity)
-        }
-    }
-}
-
-impl<S: StateStoreWrite> StateStoreWrite for TracedStateStore<S> {
-    define_state_store_write_associated_type!();
-
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
-        write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        async move {
-            // Don't trace empty ingest to save disk space
-            if kv_pairs.is_empty() && delete_ranges.is_empty() {
-                return Ok(0);
-            }
-
-            let span = trace!(
-                INGEST,
-                kv_pairs,
-                delete_ranges,
-                write_options,
-                self.storage_type
-            );
-            let res: StorageResult<usize> = self
-                .inner
-                .ingest_batch(kv_pairs, delete_ranges, write_options)
-                .await;
-            trace_result!(INGEST, span, res);
-            res
-        }
+        let span = TraceSpan::new_iter_span(
+            key_range.clone(),
+            Some(epoch),
+            read_options.clone(),
+            self.storage_type,
+        );
+        self.traced_iter(
+            read_options.table_id,
+            self.inner.iter(key_range, epoch, read_options),
+            span,
+        )
+        .map_ok(identity)
     }
 }
 
@@ -272,7 +274,7 @@ impl TracedStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_id_manager(&self) -> &SstableObjectIdManagerRef {
+    pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager()
     }
 }

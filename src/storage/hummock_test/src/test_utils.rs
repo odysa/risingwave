@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
+use risingwave_hummock_sdk::opts::WriteOptions;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
     update_filter_key_extractor_for_table_ids, update_filter_key_extractor_for_tables,

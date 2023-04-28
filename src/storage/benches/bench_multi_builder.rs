@@ -24,13 +24,14 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::opts::CachePolicy;
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache, XorFilterBuilder,
+    BatchSstableWriterFactory, CompressionAlgorithm, HummockResult, MemoryLimiter, SstableBuilder,
+    SstableBuilderOptions, SstableStore, SstableWriterFactory, SstableWriterOptions,
+    StreamingSstableWriterFactory, TieredCache, XorFilterBuilder,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 

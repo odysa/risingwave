@@ -15,8 +15,8 @@
 use core::ops::Bound::Unbounded;
 
 use risingwave_common::catalog::TableId;
-use risingwave_storage::hummock::CachePolicy;
-use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreReadExt};
+use risingwave_hummock_sdk::opts::{CachePolicy, PrefetchOptions, ReadOptions};
+use risingwave_storage::store::StateStoreReadExt;
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;

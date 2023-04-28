@@ -217,10 +217,10 @@ mod tests {
     };
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
+    use risingwave_hummock_sdk::opts::{CachePolicy, ReadOptions};
     use risingwave_source::dml_manager::DmlManager;
-    use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
+    use risingwave_storage::store::StateStoreReadExt;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;

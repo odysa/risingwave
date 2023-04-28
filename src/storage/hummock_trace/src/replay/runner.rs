@@ -77,7 +77,7 @@ mod tests {
     use itertools::Itertools;
     use mockall::predicate;
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
+    use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions, WriteOptions};
 
     use super::*;
     use crate::{
@@ -98,18 +98,18 @@ mod tests {
         let opts2 = NewLocalOptions::for_test(TableId { table_id: 2 });
         let opts3 = NewLocalOptions::for_test(TableId { table_id: 3 });
 
-        let storage_type1 = StorageType::Local(0, opts1);
-        let storage_type2 = StorageType::Local(1, opts2);
-        let storage_type3 = StorageType::Local(2, opts3);
+        let storage_type1 = StorageType::Local(0, opts1.table_id);
+        let storage_type2 = StorageType::Local(1, opts2.table_id);
+        let storage_type3 = StorageType::Local(2, opts3.table_id);
         let storage_type4 = StorageType::Global;
 
         let actor_1 = vec![
-            (0, Operation::NewLocalStorage),
+            (0, Operation::NewLocalStorage(opts1)),
             (
                 1,
                 Operation::get(
                     Bytes::from(vec![0, 1, 2, 3]),
-                    123,
+                    Some(123),
                     ReadOptions::for_test(opts1.table_id.table_id),
                 ),
             ),
@@ -125,8 +125,10 @@ mod tests {
                 Operation::ingest(
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
-                    4,
-                    opts1.table_id.table_id,
+                    WriteOptions {
+                        epoch: 4,
+                        table_id: opts1.table_id,
+                    },
                 ),
             ),
             (
@@ -140,17 +142,13 @@ mod tests {
         .map(|(record_id, op)| Ok(Record::new(storage_type1, record_id, op)));
 
         let actor_2 = vec![
-            (4, Operation::NewLocalStorage),
+            (4, Operation::NewLocalStorage(opts2)),
             (
                 5,
                 Operation::get(
-                    traced_bytes![0, 1, 2, 3],
-                    123,
-                    None,
-                    true,
-                    Some(12),
-                    opts1.table_id.table_id,
-                    false,
+                    (traced_bytes![0, 1, 2, 3]).into_bytes(),
+                    Some(123),
+                    ReadOptions::for_test(opts1.table_id.table_id),
                 ),
             ),
             (
@@ -165,8 +163,10 @@ mod tests {
                 Operation::ingest(
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
-                    4,
-                    opts2.table_id.table_id,
+                    WriteOptions {
+                        epoch: 4,
+                        table_id: opts2.table_id,
+                    },
                 ),
             ),
             (
@@ -180,17 +180,13 @@ mod tests {
         .map(|(record_id, op)| Ok(Record::new(storage_type2, record_id, op)));
 
         let actor_3 = vec![
-            (8, Operation::NewLocalStorage),
+            (8, Operation::NewLocalStorage(opts3)),
             (
                 9,
                 Operation::get(
-                    traced_bytes![0, 1, 2, 3],
-                    123,
-                    None,
-                    true,
-                    Some(12),
-                    opts3.table_id.table_id,
-                    false,
+                    (traced_bytes![0, 1, 2, 3]).into_bytes(),
+                    Some(123),
+                    ReadOptions::for_test(opts3.table_id.table_id),
                 ),
             ),
             (
@@ -205,8 +201,10 @@ mod tests {
                 Operation::ingest(
                     vec![(traced_bytes![123], Some(traced_bytes![123]))],
                     vec![],
-                    4,
-                    opts3.table_id.table_id,
+                    WriteOptions {
+                        epoch: 4,
+                        table_id: opts3.table_id,
+                    },
                 ),
             ),
             (
@@ -258,7 +256,7 @@ mod tests {
             mock_local
                 .expect_get()
                 .times(1)
-                .returning(move |_, _, _| Ok(Some(traced_bytes![54, 32, 198, 236, 24])));
+                .returning(move |_, _| Ok(Some(traced_bytes![54, 32, 198, 236, 24])));
 
             mock_local
                 .expect_ingest()
